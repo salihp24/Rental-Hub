@@ -37,7 +37,7 @@ export default function RegisterPage() {
       <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm shadow-black/5 md:p-10">
         <div className="text-2xl font-extrabold text-black">Create account</div>
         <div className="mt-1 text-sm font-semibold text-black/55">
-          Start renting and listing products.
+          Create your account to rent and list products.
         </div>
 
         {error ? (
@@ -111,11 +111,11 @@ export default function RegisterPage() {
             Why Rental Hub?
           </div>
           <div className="mt-6 text-3xl font-extrabold tracking-tight">
-            Earn from idle gadgets.
+            Turn unused equipment into income.
           </div>
           <div className="mt-3 text-sm font-semibold leading-relaxed text-white/70">
-            List products in minutes and let renters discover them on a clean,
-            modern marketplace UI.
+            Publish products quickly and connect with renters through a simple, professional
+            marketplace.
           </div>
         </div>
       </div>

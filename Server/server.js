@@ -26,16 +26,47 @@
   import productRoutes from "./routes/productRoutes.js";
   import userRoutes from "./routes/userRoutes.js";
   import categoryRoutes from "./routes/categoryRoutes.js";
+  import bookingRoutes from "./routes/bookingRoutes.js";
+  import chatRoutes from "./routes/chatRoutes.js";
+  import uploadRoutes from "./routes/uploadRoutes.js";
+  import registerChatSocket from "./socket/chatSocket.js";
+  import Conversation from "./models/Conversation.js";
 
   const app = express();
   //useful for scaling, sockets later
   const server = http.createServer(app);
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          "img-src": ["'self'", "data:", "blob:", "https:"],
+        },
+      },
+    })
+  );
+  const allowedOrigins = [
+    process.env.CLIENT_URL,
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+  ].filter(Boolean);
+
   app.use(cors({
-    origin: process.env.CLIENT_URL,
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
   }));
+  
+  // starts a Socket.IO server on the same HTTP server
+  const io = registerChatSocket(server, allowedOrigins);
+  app.set("io", io);
   //When a client sends a request to your API, Morgan prints useful info in the console
   app.use(morgan("dev"));
   app.use(express.json());
@@ -43,12 +74,36 @@
   //read cookies (for auth)
   app.use(cookieParser());
 
-  const limiter = rateLimit({
+  const isDevelopment = process.env.NODE_ENV !== "production";
+
+  const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: isDevelopment ? 1000 : 100,
+    skip: (req) => {
+      if (req.path.startsWith("/v1/chat")) return true;
+      if (isDevelopment) return true;
+      return false;
+    },
     message: { status: "fail", message: "Too many requests, please try again later." },
   });
-  app.use("/api", limiter);
+  app.use("/api", apiLimiter);
+
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: isDevelopment ? 50 : 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      status: "fail",
+      message: "Too many login attempts, please try again later.",
+    },
+  });
+
+  const chatLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 400,
+    message: { status: "fail", message: "Too many chat requests, please slow down a bit." },
+  });
 
   // Lightweight health check for local testing and monitoring.
   app.get("/api/v1/health", (req, res) => {
@@ -59,9 +114,14 @@
     });
   });
 
+  app.use("/api/v1/users/login", authLimiter);
+  app.use("/api/v1/users/register", authLimiter);
   app.use("/api/v1/users", userRoutes);
   app.use("/api/v1/categories", categoryRoutes);
   app.use("/api/v1/products", productRoutes);
+  app.use("/api/v1/bookings", bookingRoutes);
+  app.use("/api/v1/chat", chatLimiter, chatRoutes);
+  app.use("/api/v1/uploads", uploadRoutes);
 
   app.use(notFound);
   //handles all errors globally
@@ -69,8 +129,21 @@
 
   const PORT = process.env.PORT || 5000;
 
+  const ensureConversationIndexes = async () => {
+    const collection = Conversation.collection;
+    const indexes = await collection.indexes();
+    const bookingIndex = indexes.find((index) => index.name === "booking_1");
+
+    if (bookingIndex && !bookingIndex.partialFilterExpression) {
+      await collection.dropIndex("booking_1");
+    }
+
+    await Conversation.syncIndexes();
+  };
+
   const startServer = async () => {
     await connectDB();
+    await ensureConversationIndexes();
 
     server.listen(PORT, () => {
       console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);

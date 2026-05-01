@@ -18,23 +18,21 @@ function subtreeMatches(node, q) {
   return false;
 }
 
-/** Depth-first: prefer a leaf so attributes usually match the deepest node. */
-function pickDefaultCategory(nodes) {
-  if (!nodes?.length) return null;
-  for (const n of nodes) {
-    if (!n.children?.length) return n;
-    const deeper = pickDefaultCategory(n.children);
-    if (deeper) return deeper;
-  }
-  return nodes[0];
-}
-
 function collectAncestorIds(nodes, targetId, chain = []) {
   for (const n of nodes || []) {
     const id = normaliseId(n._id);
     const next = [...chain, id];
     if (id === normaliseId(targetId)) return next;
     const found = collectAncestorIds(n.children, targetId, next);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findNodeById(nodes, targetId) {
+  for (const n of nodes || []) {
+    if (normaliseId(n._id) === normaliseId(targetId)) return n;
+    const found = findNodeById(n.children, targetId);
     if (found) return found;
   }
   return null;
@@ -65,11 +63,11 @@ function Row({ node, depth, expanded, toggle, value, onPick, search }) {
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-black/70 hover:bg-black/10"
             onClick={() => toggle(id)}
           >
-            {open ? "▾" : "▸"}
+            {open ? "v" : ">"}
           </button>
         ) : (
           <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-black/25">
-            ·
+            .
           </span>
         )}
         <button
@@ -105,15 +103,16 @@ export default function CategoryTreeSelect({
   onChange,
   disabled = false,
   onMetaChange,
+  allowClear = false,
 }) {
   const [tree, setTree] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [expanded, setExpanded] = useState(() => new Set());
+  const [manualExpanded, setManualExpanded] = useState(() => new Set());
   const [search, setSearch] = useState("");
 
   const toggle = useCallback((id) => {
-    setExpanded((prev) => {
+    setManualExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -132,39 +131,22 @@ export default function CategoryTreeSelect({
 
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       setLoading(true);
       setLoadError(null);
+
       try {
         const res = await api.get("/categories/tree");
-        const t = res.data?.data?.tree ?? [];
+        const nextTree = res.data?.data?.tree ?? [];
         if (cancelled) return;
-        setTree(t);
-        const initial = new Set();
-        for (const root of t) {
-          initial.add(normaliseId(root._id));
-        }
-        setExpanded(initial);
 
-        const def = pickDefaultCategory(t);
-        if (def && !normaliseId(value)) {
-          onPick(def);
-          const autoChain = collectAncestorIds(t, def._id);
-          if (autoChain?.length) {
-            setExpanded((prev) => {
-              const next = new Set(prev);
-              autoChain.slice(0, -1).forEach((id) => next.add(id));
-              return next;
-            });
-          }
-        } else if (normaliseId(value) && t.length) {
-          const chain = collectAncestorIds(t, value);
-          if (chain?.length) {
-            setExpanded((prev) => {
-              const next = new Set(prev);
-              chain.slice(0, -1).forEach((id) => next.add(id));
-              return next;
-            });
+        setTree(nextTree);
+
+        if (normaliseId(value) && nextTree.length) {
+          const selectedNode = findNodeById(nextTree, value);
+          if (selectedNode) {
+            onMetaChange?.(selectedNode);
           }
         }
       } catch (e) {
@@ -180,21 +162,49 @@ export default function CategoryTreeSelect({
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-    // Intentionally load once; `value` is read only for initial expansion / autopick.
+    // Intentionally load once; `value` is read only for initial expansion and auto-pick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const empty = useMemo(() => !loading && !tree.length, [loading, tree.length]);
+  const expanded = useMemo(() => {
+    const next = new Set(manualExpanded);
 
+    for (const root of tree) {
+      next.add(normaliseId(root._id));
+    }
+
+    const chain = normaliseId(value) ? collectAncestorIds(tree, value) : null;
+    chain?.slice(0, -1).forEach((ancestorId) => next.add(ancestorId));
+
+    return next;
+  }, [manualExpanded, tree, value]);
   return (
     <div className="space-y-2">
+      {allowClear && normaliseId(value) ? (
+        <div className="flex items-center justify-between rounded-xl border border-black/10 bg-white px-3 py-2 text-xs font-semibold text-black/60">
+          <span>Selected category ready</span>
+          <button
+            type="button"
+            className="rounded-lg px-2 py-1 text-black hover:bg-black/[0.04]"
+            onClick={() => {
+              onChange?.("", null);
+              onMetaChange?.(null);
+            }}
+            disabled={disabled}
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
       <Input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search in tree…"
+        placeholder="Search in tree..."
         disabled={disabled || loading || empty}
         className="text-sm"
       />
@@ -203,7 +213,9 @@ export default function CategoryTreeSelect({
         aria-busy={loading}
       >
         {loading ? (
-          <div className="px-2 py-3 text-xs font-semibold text-black/50">Loading categories…</div>
+          <div className="px-2 py-3 text-xs font-semibold text-black/50">
+            Loading categories...
+          </div>
         ) : loadError ? (
           <div className="px-2 py-3 text-xs font-semibold text-red-700">{loadError}</div>
         ) : empty ? (

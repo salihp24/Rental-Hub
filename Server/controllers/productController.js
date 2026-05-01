@@ -2,7 +2,7 @@ import asyncHandler from "../utils/asyncHandler.js";
 import {
   createProductService,
   getProductsService,
-  getProductByIdService,
+  getProductByIdentifierService,
   updateProductService,
   deleteProductService,
   getProductPricingService,
@@ -38,7 +38,7 @@ export const getProducts = asyncHandler(async (req, res) => {
 
 // GET ONE
 export const getProduct = asyncHandler(async (req, res) => {
-  const product = await getProductByIdService(req.params.productId);
+  const product = await getProductByIdentifierService(req.params.productIdentifier);
 
   res.status(200).json({
     status: "success",
@@ -72,9 +72,18 @@ export const deleteProduct = asyncHandler(async (req, res) => {
 
 // PRICING
 export const getProductPricing = asyncHandler(async (req, res) => {
+  const pricingUnit = req.query.pricingUnit || "daily";
+  const quantity =
+    pricingUnit === "hourly"
+      ? parseFloat(req.query.hours)
+      : pricingUnit === "weekly"
+        ? parseFloat(req.query.weeks)
+        : parseInt(req.query.days);
+
   const result = await getProductPricingService(
     req.params.productId,
-    parseInt(req.query.days)
+    quantity,
+    pricingUnit
   );
 
   res.status(200).json({
@@ -82,7 +91,8 @@ export const getProductPricing = asyncHandler(async (req, res) => {
     data: {
       productId: result.product._id,
       title: result.product.title,
-      totalDays: result.days,
+      totalUnits: result.quantity,
+      pricingUnit: result.pricingUnit,
       pricing: result.breakdown,
     },
   });

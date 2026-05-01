@@ -159,21 +159,47 @@ const productIdParamsSchema = Joi.object({
   productId: objectId("productId").required(),
 });
 
+const productIdentifierParamsSchema = Joi.object({
+  productIdentifier: Joi.string().trim().min(1).required(),
+});
+
 const productListQuerySchema = paginationQuerySchema.keys({
   category: objectId("category"),
   owner: objectId("owner"),
+  featured: Joi.boolean(),
   city: Joi.string().trim().max(80),
   state: Joi.string().trim().max(80),
+  lat: Joi.number().min(-90).max(90),
+  lng: Joi.number().min(-180).max(180),
+  radiusKm: Joi.number().min(0.1).max(500).default(25),
   condition: Joi.string().valid("new", "like_new", "good", "fair"),
   status: Joi.string().valid("active", "inactive", "rented", "under_review"),
   minPrice: Joi.number().min(0),
   maxPrice: Joi.number().min(Joi.ref("minPrice")),
-});
+  search: Joi.string().trim().max(100),
+  sort: Joi.string().valid(
+    "newest",
+    "price_asc",
+    "price_desc",
+    "rating",
+    "nearest",
+    "featured",
+    "trending"
+  ),
+}).pattern(
+  /^attr_[a-zA-Z0-9_]+$/,
+  Joi.alternatives().try(
+    Joi.string().trim().max(100),
+    Joi.number(),
+    Joi.boolean()
+  )
+);
 
 export const productValidation = {
   create: { body: createProductBodySchema },
   update: { body: updateProductBodySchema },
   params: { params: productIdParamsSchema },
+  publicParams: { params: productIdentifierParamsSchema },
   listQuery: { query: productListQuerySchema },
 };
 

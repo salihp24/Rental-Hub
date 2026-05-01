@@ -3,6 +3,13 @@ import mongoose from "mongoose";
 
 const bookingSchema = new mongoose.Schema(
   {
+    orderCode: {
+      type: String,
+      required: true,
+      unique: true,
+      uppercase: true,
+      trim: true,
+    },
     product: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -27,7 +34,20 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
       required: [true, "End date is required"],
     },
+    pricingUnit: {
+      type: String,
+      enum: ["hourly", "daily", "weekly"],
+      default: "daily",
+    },
     totalDays: {
+      type: Number,
+      required: true,
+    },
+    totalHours: {
+      type: Number,
+      default: 0,
+    },
+    totalUnits: {
       type: Number,
       required: true,
     },
@@ -36,6 +56,13 @@ const bookingSchema = new mongoose.Schema(
     // existing bookings are not affected
     pricingSnapshot: {
       baseRate: Number,       // daily rate at time of booking
+      negotiatedRate: Number, // accepted negotiated daily rate for this booking
+      isNegotiated: { type: Boolean, default: false },
+      negotiatedFromOffer: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message",
+        default: null,
+      },
       appliedSlab: {          // which slab was applied (if any)
         minDays: Number,
         maxDays: Number,
@@ -48,6 +75,13 @@ const bookingSchema = new mongoose.Schema(
       platformFee: Number,    // our commission
       totalAmount: Number,    // rentalAmount + deposit + platformFee
       currency: { type: String, default: "INR" },
+      pricingUnit: {
+        type: String,
+        enum: ["hourly", "daily", "weekly"],
+        default: "daily",
+      },
+      totalUnits: Number,
+      unitLabel: String,
     },
     // Booking status flow:
     // pending → confirmed → active → completed
@@ -55,7 +89,15 @@ const bookingSchema = new mongoose.Schema(
     //         → rejected  (owner rejects)
     status: {
       type: String,
-      enum: ["pending", "confirmed", "active", "completed", "cancelled", "rejected"],
+      enum: [
+        "pending",
+        "confirmed",
+        "active",
+        "return_requested",
+        "completed",
+        "cancelled",
+        "rejected",
+      ],
       default: "pending",
     },
     paymentStatus: {
@@ -63,12 +105,59 @@ const bookingSchema = new mongoose.Schema(
       enum: ["unpaid", "paid", "refunded", "partially_refunded"],
       default: "unpaid",
     },
+    paymentMethod: {
+      type: String,
+      enum: ["dummy", "razorpay"],
+      default: "razorpay",
+    },
+    paymentDetails: {
+      reference: {
+        type: String,
+        default: "",
+      },
+      razorpayOrderId: {
+        type: String,
+        default: "",
+      },
+      razorpayPaymentId: {
+        type: String,
+        default: "",
+      },
+      razorpaySignature: {
+        type: String,
+        default: "",
+      },
+      confirmedAt: Date,
+      notes: {
+        type: String,
+        default: "",
+      },
+      refundId: {
+        type: String,
+        default: "",
+      },
+      refundStatus: {
+        type: String,
+        default: "",
+      },
+      refundAmount: {
+        type: Number,
+        default: 0,
+      },
+      refundedAt: Date,
+    },
     // Cancellation info
     cancellation: {
       cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       reason: String,
       cancelledAt: Date,
       refundAmount: Number,
+    },
+    returnFlow: {
+      requestedAt: Date,
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      confirmedAt: Date,
+      confirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     },
     // Delivery preference
     deliveryType: {
@@ -98,6 +187,7 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ renter: 1 });
 bookingSchema.index({ owner: 1 });
 bookingSchema.index({ product: 1 });
+bookingSchema.index({ orderCode: 1 }, { unique: true });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ startDate: 1, endDate: 1 });
 

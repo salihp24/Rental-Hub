@@ -23,7 +23,7 @@ router.get("/", validate(productValidation.listQuery), getProducts);
 router.get("/mine", protect, validate(productValidation.listQuery), getMyListings);
 
 //get single product
-router.get("/:productId", validate(productValidation.params), getProduct);
+router.get("/:productIdentifier", validate(productValidation.publicParams), getProduct);
 
 //get product pricing
 router.get(

@@ -40,10 +40,10 @@ export default function LoginPage() {
             Welcome back
           </div>
           <div className="mt-6 text-3xl font-extrabold tracking-tight text-black">
-            Login to rent or lend.
+            Sign in to continue.
           </div>
           <div className="mt-3 text-sm font-semibold leading-relaxed text-black/60">
-            Browse listings, manage your products, and start renting in minutes.
+            Access your listings, bookings, messages, and account details.
           </div>
         </div>
       </div>
@@ -51,7 +51,7 @@ export default function LoginPage() {
       <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm shadow-black/5 md:p-10">
         <div className="text-2xl font-extrabold text-black">Sign in</div>
         <div className="mt-1 text-sm font-semibold text-black/55">
-          Use your email and password.
+          Enter your email and password to access your account.
         </div>
 
         {error ? (
@@ -79,7 +79,7 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="Enter your password"
               autoComplete="current-password"
               required
             />
@@ -91,7 +91,7 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-6 text-sm font-semibold text-black/60">
-          Don’t have an account?{" "}
+          Do not have an account?{" "}
           <Link to="/register" className="font-extrabold text-black underline">
             Create one
           </Link>

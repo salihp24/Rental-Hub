@@ -1,9 +1,10 @@
 export default function Button({
-  as: As = "button",
+  as = "button",
   className = "",
   variant = "primary",
   ...props
 }) {
+  const Component = as;
   const base =
     "inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-black/20 disabled:opacity-60 disabled:cursor-not-allowed";
 
@@ -15,6 +16,8 @@ export default function Button({
     ghost: "bg-transparent text-black hover:bg-black/[0.04]",
   };
 
-  return <As className={`${base} ${variants[variant]} ${className}`} {...props} />;
+  return (
+    <Component className={`${base} ${variants[variant]} ${className}`} {...props} />
+  );
 }
 

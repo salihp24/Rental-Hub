@@ -1,16 +1,47 @@
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { logout } from "../../store/slices/authSlice";
 import Button from "../ui/Button";
 
 export default function Navbar() {
+  const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const dispatch = useDispatch();
   const { user } = useSelector((s) => s.auth);
+  const profileLabel = `${(user?.name || user?.email || "User").split(" ")[0]} Profile`;
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (location.pathname === "/products") {
+      setSearch(searchParams.get("search") || "");
+      return;
+    }
+
+    setSearch("");
+  }, [location.pathname, searchParams]);
 
   const onLogout = async () => {
     await dispatch(logout());
     navigate("/login");
+  };
+
+  const onSearchSubmit = (e) => {
+    e.preventDefault();
+
+    const query = search.trim();
+    const nextParams = new URLSearchParams();
+
+    if (query) nextParams.set("search", query);
+    nextParams.set("page", "1");
+    nextParams.set("limit", "12");
+    nextParams.set("sort", "newest");
+
+    navigate({
+      pathname: "/products",
+      search: `?${nextParams.toString()}`,
+    });
   };
 
   return (
@@ -27,15 +58,21 @@ export default function Navbar() {
         </Link>
 
         <div className="hidden flex-1 items-center md:flex">
-          <div className="relative w-full">
+          <form className="relative w-full" onSubmit={onSearchSubmit}>
             <input
-              placeholder="Search for cameras, gadgets, accessories…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search cameras, laptops, audio gear, and more"
+              aria-label="Search rental products"
               className="w-full rounded-xl border border-black/10 bg-white/95 px-4 py-2.5 text-sm outline-none placeholder:text-black/40 focus:border-black/25 focus:ring-2 focus:ring-black/10"
             />
-            <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-black/50">
-              ⌘K
-            </div>
-          </div>
+            <button
+              type="submit"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-black px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-black/85"
+            >
+              Search
+            </button>
+          </form>
         </div>
 
         <nav className="ml-auto flex items-center gap-2">
@@ -48,6 +85,16 @@ export default function Navbar() {
             }
           >
             Home
+          </NavLink>
+          <NavLink
+            to="/products"
+            className={({ isActive }) =>
+              `hidden rounded-xl px-3 py-2 text-sm font-semibold md:inline-flex ${
+                isActive ? "bg-black/10 text-black" : "text-black/80 hover:bg-black/5"
+              }`
+            }
+          >
+            Browse
           </NavLink>
 
           {!user ? (
@@ -76,12 +123,26 @@ export default function Navbar() {
               >
                 List
               </NavLink>
-              <div className="hidden flex-col items-end md:flex">
-                <div className="text-xs font-semibold text-black/70">Signed in</div>
-                <div className="max-w-[180px] truncate text-sm font-bold text-black">
-                  {user.name || user.email}
-                </div>
-              </div>
+              <NavLink
+                to="/chat"
+                className={({ isActive }) =>
+                  `inline-flex rounded-xl px-2.5 py-2 text-xs font-semibold md:px-3 md:text-sm ${
+                    isActive ? "bg-black/10 text-black" : "text-black/80 hover:bg-black/5"
+                  }`
+                }
+              >
+                Chat
+              </NavLink>
+              <NavLink
+                to="/account"
+                className={({ isActive }) =>
+                  `inline-flex rounded-xl px-2.5 py-2 text-xs font-semibold md:px-3 md:text-sm ${
+                    isActive ? "bg-black/10 text-black" : "text-black/80 hover:bg-black/5"
+                  }`
+                }
+              >
+                {profileLabel}
+              </NavLink>
               <Button variant="secondary" onClick={onLogout}>
                 Logout
               </Button>

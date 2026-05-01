@@ -1,9 +1,12 @@
 import Product from "../models/Product.js";
 import Category from "../models/Category.js";
+import mongoose from "mongoose";
 import AppError from "../utils/AppError.js";
-import { buildUniqueProductSlug } from "../utils/slug.js";
+import { buildUniqueProductSlug } from "../utils/Slug.js";
 import { computePricing } from "../utils/Pricing.js";
 import { getSubtreeCategoryIds } from "../utils/categoryTree.js";
+import { destroyCloudinaryAsset } from "../config/cloudinary.js";
+import { assertCloudinaryImages, isCloudinaryImageUrl } from "../utils/cloudinaryImage.js";
 
 // CREATE PRODUCT
 export const createProductService = async (data, user) => {
@@ -17,6 +20,10 @@ export const createProductService = async (data, user) => {
   // Prevent creating products under inactive categories.
   if (!category.isActive)
     throw new AppError("Cannot list in inactive category.", 400);
+
+  if (!assertCloudinaryImages(data.images)) {
+    throw new AppError("Product images must be uploaded to Cloudinary before listing.", 400);
+  }
 
   // Create the product with the request payload.
   // We also set the current user as owner and generate a unique slug.
@@ -40,8 +47,12 @@ export const getProductsService = async (query) => {
   const {
     category,
     owner,
+    featured,
     city,
     state,
+    lat,
+    lng,
+    radiusKm = 25,
     condition,
     status,
     minPrice,
@@ -50,6 +61,7 @@ export const getProductsService = async (query) => {
     sort = "newest",
     page = 1,
     limit = 10,
+    ...dynamicFilters
   } = query;
 
   // Build the MongoDB filter step by step.
@@ -64,10 +76,22 @@ export const getProductsService = async (query) => {
 
   // Filter products by owner if that query is provided.
   if (owner) filter.owner = owner;
+  if (featured !== undefined) filter.isFeatured = featured;
 
   // Case-insensitive partial matching for location fields.
   if (city) filter["location.city"] = { $regex: city, $options: "i" };
   if (state) filter["location.state"] = { $regex: state, $options: "i" };
+  if (lat != null && lng != null) {
+    filter["location.coordinates"] = {
+      $near: {
+        $geometry: {
+          type: "Point",
+          coordinates: [Number(lng), Number(lat)],
+        },
+        $maxDistance: Number(radiusKm) * 1000,
+      },
+    };
+  }
 
   // Match condition such as new / good / fair.
   if (condition) filter.condition = condition;
@@ -87,11 +111,50 @@ export const getProductsService = async (query) => {
     filter.$text = { $search: search };
   }
 
+  for (const [key, rawValue] of Object.entries(dynamicFilters)) {
+    if (!key.startsWith("attr_")) continue;
+    if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+
+    const attributeKey = key.slice(5);
+    if (!attributeKey) continue;
+
+    if (typeof rawValue === "boolean") {
+      filter[`attributes.${attributeKey}`] = rawValue;
+      continue;
+    }
+
+    if (typeof rawValue === "number") {
+      filter[`attributes.${attributeKey}`] = rawValue;
+      continue;
+    }
+
+    const normalizedValue = String(rawValue).trim();
+    if (!normalizedValue) continue;
+
+    if (normalizedValue === "true" || normalizedValue === "false") {
+      filter[`attributes.${attributeKey}`] = normalizedValue === "true";
+      continue;
+    }
+
+    const numericValue = Number(normalizedValue);
+    if (!Number.isNaN(numericValue) && normalizedValue === String(numericValue)) {
+      filter[`attributes.${attributeKey}`] = numericValue;
+      continue;
+    }
+
+    filter[`attributes.${attributeKey}`] = {
+      $regex: `^${normalizedValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+      $options: "i",
+    };
+  }
+
   // Supported sort options for browsing.
   const sortMap = {
     price_asc: { "pricing.daily.rate": 1 },
     price_desc: { "pricing.daily.rate": -1 },
     rating: { "ratings.average": -1 },
+    featured: { isFeatured: -1, "ratings.average": -1, totalRentals: -1, createdAt: -1 },
+    trending: { totalRentals: -1, "ratings.average": -1, createdAt: -1 },
     newest: { createdAt: -1 },
   };
 
@@ -105,7 +168,7 @@ export const getProductsService = async (query) => {
       .select("-blockedDates -__v")
       .populate("category", "name slug parent level")
       .populate("owner", "name avatar ratings.asOwner")
-      .sort(sortMap[sort] || sortMap.newest)
+      .sort(sort === "nearest" ? undefined : sortMap[sort] || sortMap.newest)
       .skip(skip)
       .limit(Number(limit)),
 
@@ -116,9 +179,13 @@ export const getProductsService = async (query) => {
 };
 
 // GET SINGLE PRODUCT
-export const getProductByIdService = async (productId) => {
+export const getProductByIdentifierService = async (identifier) => {
   // Fetch one product with related category and owner details.
-  const product = await Product.findById(productId)
+  const finder = mongoose.isValidObjectId(identifier)
+    ? { $or: [{ _id: identifier }, { slug: identifier }] }
+    : { slug: identifier };
+
+  const product = await Product.findOne(finder)
     .select("-__v")
     .populate("category", "name slug attributes parent ancestors level")
     .populate("owner", "name avatar phone ownerProfile ratings.asOwner createdAt");
@@ -158,6 +225,25 @@ export const updateProductService = async (productId, data, user) => {
       throw new AppError("Inactive category.", 400);
   }
 
+  if (Array.isArray(data.images) && !assertCloudinaryImages(data.images)) {
+    throw new AppError("Product images must use Cloudinary URLs.", 400);
+  }
+
+  if (Array.isArray(data.images)) {
+    const nextPublicIds = new Set(
+      data.images.map((image) => image?.publicId).filter(Boolean)
+    );
+    const removedPublicIds = product.images
+      .map((image) => image?.publicId)
+      .filter((publicId) => publicId && !nextPublicIds.has(publicId));
+
+    if (removedPublicIds.length) {
+      await Promise.allSettled(
+        removedPublicIds.map((publicId) => destroyCloudinaryAsset(publicId))
+      );
+    }
+  }
+
   // Apply the update and keep Mongoose validation enabled.
   return await Product.findByIdAndUpdate(productId, data, {
     new: true,
@@ -183,15 +269,27 @@ export const deleteProductService = async (productId, user) => {
   if (product.status === "rented")
     throw new AppError("Currently rented.", 400);
 
+  const imagePublicIds = product.images
+    .filter((image) => isCloudinaryImageUrl(image?.url))
+    .map((image) => image?.publicId)
+    .filter(Boolean);
+
+  if (imagePublicIds.length) {
+    await Promise.allSettled(
+      imagePublicIds.map((publicId) => destroyCloudinaryAsset(publicId))
+    );
+  }
+
   // Remove the document from the database.
   await product.deleteOne();
 };
 
 // PRICING
-export const getProductPricingService = async (productId, days) => {
-  // Rental pricing must be calculated for at least 1 day.
-  if (!days || days < 1)
-    throw new AppError("Invalid days.", 400);
+export const getProductPricingService = async (productId, quantity, pricingUnit = "daily") => {
+  const totalUnits = Number(quantity || 0);
+  if (!totalUnits || totalUnits < 1) {
+    throw new AppError("Invalid pricing quantity.", 400);
+  }
 
   // Fetch only the fields needed for price calculation.
   const product = await Product.findById(productId).select(
@@ -205,18 +303,27 @@ export const getProductPricingService = async (productId, days) => {
     throw new AppError("Not available.", 400);
 
   // Enforce the product's booking rules before calculating totals.
-  if (days < product.rentalRules.minRentalDays)
+  if (pricingUnit === "daily" && totalUnits < product.rentalRules.minRentalDays)
     throw new AppError("Below minimum days.", 400);
 
-  if (days > product.rentalRules.maxRentalDays)
+  if (pricingUnit === "daily" && totalUnits > product.rentalRules.maxRentalDays)
     throw new AppError("Above maximum days.", 400);
+
+  if (pricingUnit === "hourly" && !product.pricing?.hourly?.enabled) {
+    throw new AppError("Hourly pricing is not enabled for this product.", 400);
+  }
+
+  if (pricingUnit === "weekly" && !product.pricing?.weekly?.enabled) {
+    throw new AppError("Weekly pricing is not enabled for this product.", 400);
+  }
 
   return {
     product,
     // Utility returns the pricing breakdown:
     // base price, slab discounts, totals, etc.
-    breakdown: computePricing(product.pricing, days),
-    days,
+    breakdown: computePricing(product.pricing, totalUnits, { pricingUnit }),
+    quantity: totalUnits,
+    pricingUnit,
   };
 };
 

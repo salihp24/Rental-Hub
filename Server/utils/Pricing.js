@@ -1,30 +1,47 @@
-export const computePricing = (pricing, totalDays) => {
-  const baseRate = pricing.daily.rate;
-  const subtotal = baseRate * totalDays;
+const UNIT_LABELS = {
+  hourly: "hour",
+  daily: "day",
+  weekly: "week",
+};
 
-  //  Ensures slabs are checked in correct order
-  const slabs = [...(pricing.slabs || [])].sort((a, b) => a.minDays - b.minDays);
+export const computePricing = (pricing, totalUnits, options = {}) => {
+  const pricingUnit = options.pricingUnit || "daily";
+  const quantity = Number(totalUnits || 0);
 
-  // Find Matching Slab
+  let baseRate = 0;
+  if (options.baseRateOverride != null) {
+    baseRate = Number(options.baseRateOverride);
+  } else if (pricingUnit === "hourly") {
+    baseRate = Number(pricing?.hourly?.rate || 0);
+  } else if (pricingUnit === "weekly") {
+    baseRate = Number(pricing?.weekly?.rate || 0);
+  } else {
+    baseRate = Number(pricing?.daily?.rate || 0);
+  }
+
+  const subtotal = baseRate * quantity;
+
+  const slabs =
+    pricingUnit === "daily"
+      ? [...(pricing.slabs || [])].sort((a, b) => a.minDays - b.minDays)
+      : [];
+
   const appliedSlab =
-    slabs.find(
-      (s) => totalDays >= s.minDays && totalDays <= s.maxDays
-    ) || null;
+    pricingUnit === "daily"
+      ? slabs.find((s) => quantity >= s.minDays && quantity <= s.maxDays) || null
+      : null;
 
-// Get Discount %
   const discountPercent = appliedSlab ? appliedSlab.discountPercent : 0;
-
-// Calculate Discount
   const discountAmount = +(subtotal * (discountPercent / 100)).toFixed(2);
-
   const rentalAmount = +(subtotal - discountAmount).toFixed(2);
-  const deposit = pricing.deposit || 0;
-
-  //revenue
+  const deposit = Number(pricing?.deposit || 0);
   const platformFee = +(rentalAmount * 0.05).toFixed(2);
   const totalAmount = +(rentalAmount + deposit + platformFee).toFixed(2);
 
   return {
+    pricingUnit,
+    unitLabel: UNIT_LABELS[pricingUnit] || "unit",
+    totalUnits: quantity,
     baseRate,
     appliedSlab,
     subtotal: +subtotal.toFixed(2),
@@ -33,6 +50,6 @@ export const computePricing = (pricing, totalDays) => {
     deposit,
     platformFee,
     totalAmount,
-    currency: pricing.currency || "INR",
+    currency: options.currencyOverride || pricing.currency || "INR",
   };
 };

@@ -1,4 +1,5 @@
-import Button from "../ui/Button";
+import { Link } from "react-router-dom";
+import { getPrimaryImageUrl } from "../../lib/productImages";
 
 const money = (value, currency = "INR") => {
   const num = Number(value || 0);
@@ -14,8 +15,9 @@ const money = (value, currency = "INR") => {
 };
 
 export default function ProductCard({ product }) {
-  const imageUrl = product?.images?.[0]?.url;
+  const imageUrl = getPrimaryImageUrl(product?.images);
   const title = product?.title || "Untitled";
+  const productPath = product?.slug || product?._id;
   const city = product?.location?.city;
   const state = product?.location?.state;
   const price = product?.pricing?.daily?.rate;
@@ -39,6 +41,11 @@ export default function ProductCard({ product }) {
         <div className="absolute left-3 top-3 rounded-full bg-black/80 px-2.5 py-1 text-[11px] font-bold text-white">
           {product?.condition?.replaceAll("_", " ") || "good"}
         </div>
+        {product?.isFeatured ? (
+          <div className="absolute right-3 top-3 rounded-full bg-[#FFC800] px-2.5 py-1 text-[11px] font-extrabold text-black">
+            Featured
+          </div>
+        ) : null}
       </div>
 
       <div className="p-4">
@@ -59,13 +66,12 @@ export default function ProductCard({ product }) {
           </div>
         </div>
 
-        <Button
-          variant="secondary"
-          className="mt-4 w-full"
-          onClick={() => {}}
+        <Link
+          className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black transition hover:border-black/20 hover:bg-black/[0.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-black/20"
+          to={`/products/${productPath}`}
         >
           View
-        </Button>
+        </Link>
       </div>
     </div>
   );

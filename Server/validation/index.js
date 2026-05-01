@@ -4,4 +4,5 @@ export { userValidation } from "./userValidation.js";
 export { categoryValidation } from "./categoryValidation.js";
 export { productValidation } from "./productValidation.js";
 export { bookingValidation } from "./bookingValidation.js";
+export { chatValidation } from "./chatValidation.js";
 export { reviewValidation } from "./reviewValidation.js";

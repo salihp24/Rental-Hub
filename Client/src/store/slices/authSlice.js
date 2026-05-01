@@ -78,6 +78,75 @@ export const logout = createAsyncThunk(
   }
 );
 
+export const fetchCurrentUser = createAsyncThunk(
+  "auth/fetchCurrentUser",
+  async (_, { rejectWithValue }) => {
+    try {
+      const res = await api.get("/users/me");
+      const body = res.data;
+      return {
+        user: body?.data?.user ?? null,
+      };
+    } catch (err) {
+      return rejectWithValue(
+        err?.response?.data?.message || err.message || "Failed to load user"
+      );
+    }
+  }
+);
+
+export const updateProfile = createAsyncThunk(
+  "auth/updateProfile",
+  async (payload, { rejectWithValue }) => {
+    try {
+      const res = await api.patch("/users/me", payload);
+      const body = res.data;
+      return {
+        user: body?.data?.user ?? null,
+      };
+    } catch (err) {
+      return rejectWithValue(
+        err?.response?.data?.message || err.message || "Profile update failed"
+      );
+    }
+  }
+);
+
+export const updateOwnerProfile = createAsyncThunk(
+  "auth/updateOwnerProfile",
+  async (payload, { rejectWithValue }) => {
+    try {
+      const res = await api.patch("/users/me/owner-profile", payload);
+      const body = res.data;
+      return {
+        user: body?.data?.user ?? null,
+      };
+    } catch (err) {
+      return rejectWithValue(
+        err?.response?.data?.message || err.message || "Owner profile update failed"
+      );
+    }
+  }
+);
+
+export const updatePassword = createAsyncThunk(
+  "auth/updatePassword",
+  async (payload, { rejectWithValue }) => {
+    try {
+      const res = await api.patch("/users/me/password", payload);
+      const body = res.data;
+      return {
+        user: body?.data?.user ?? null,
+        token: body?.token ?? null,
+      };
+    } catch (err) {
+      return rejectWithValue(
+        err?.response?.data?.message || err.message || "Password update failed"
+      );
+    }
+  }
+);
+
 const authSlice = createSlice({
   name: "auth",
   initialState: {
@@ -130,6 +199,45 @@ const authSlice = createSlice({
         } catch {
           // ignore
         }
+      })
+      .addCase(fetchCurrentUser.pending, setPending)
+      .addCase(fetchCurrentUser.rejected, (state, action) => {
+        state.status = "failed";
+        state.user = null;
+        state.token = null;
+        state.error = action.payload || "Failed to load user";
+        try {
+          localStorage.removeItem(storageKey);
+        } catch {
+          // ignore
+        }
+      })
+      .addCase(fetchCurrentUser.fulfilled, (state, action) => {
+        state.status = "succeeded";
+        state.user = action.payload?.user || null;
+        persist(state);
+      })
+      .addCase(updateProfile.pending, setPending)
+      .addCase(updateProfile.rejected, setRejected)
+      .addCase(updateProfile.fulfilled, (state, action) => {
+        state.status = "succeeded";
+        state.user = action.payload?.user || null;
+        persist(state);
+      })
+      .addCase(updateOwnerProfile.pending, setPending)
+      .addCase(updateOwnerProfile.rejected, setRejected)
+      .addCase(updateOwnerProfile.fulfilled, (state, action) => {
+        state.status = "succeeded";
+        state.user = action.payload?.user || null;
+        persist(state);
+      })
+      .addCase(updatePassword.pending, setPending)
+      .addCase(updatePassword.rejected, setRejected)
+      .addCase(updatePassword.fulfilled, (state, action) => {
+        state.status = "succeeded";
+        state.user = action.payload?.user || null;
+        state.token = action.payload?.token || state.token;
+        persist(state);
       });
   },
 });

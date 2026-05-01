@@ -42,6 +42,11 @@ const updateOwnerProfileBodySchema = Joi.object({
   ownerProfile: ownerProfileUpdateSchema.required(),
 }).min(1);
 
+const updatePasswordBodySchema = Joi.object({
+  currentPassword: Joi.string().min(6).max(128).required(),
+  newPassword: Joi.string().min(6).max(128).required(),
+});
+
 const userIdParamsSchema = Joi.object({
   userId: objectId("userId").required(),
 });
@@ -51,6 +56,7 @@ export const userValidation = {
   login: { body: loginBodySchema },
   updateProfile: { body: updateProfileBodySchema },
   updateOwnerProfile: { body: updateOwnerProfileBodySchema },
+  updatePassword: { body: updatePasswordBodySchema },
   userIdParams: { params: userIdParamsSchema },
 };
 

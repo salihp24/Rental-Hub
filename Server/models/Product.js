@@ -1,9 +1,9 @@
 // Product model: rental listing details, pricing rules, location, and availability.
 import mongoose from "mongoose";
 
-// Pricing slab: for a given day range, apply a discount
+// Pricing slab: for a given day range, apply a discount.
 // e.g. { minDays: 8, maxDays: 30, discountPercent: 20 }
-// means: if renting for 8–30 days, 20% off the daily rate
+// means: if renting for 8-30 days, 20% off the daily rate
 const pricingSlabSchema = new mongoose.Schema(
   {
     minDays: { type: Number, required: true },
@@ -47,37 +47,28 @@ const productSchema = new mongoose.Schema(
         publicId: { type: String, required: true },
       },
     ],
-    // Dynamic attributes based on category
-    // e.g. { brand: "Samsung", model: "Galaxy S23", condition: "Good" }
     attributes: {
       type: Map,
       of: mongoose.Schema.Types.Mixed,
       default: {},
     },
-    // Pricing
     pricing: {
-      // Owner sets which modes are available
       hourly: {
         enabled: { type: Boolean, default: false },
-        rate: { type: Number, default: 0 }, // price per hour
+        rate: { type: Number, default: 0 },
       },
       daily: {
         enabled: { type: Boolean, default: true },
-        rate: { type: Number, required: true, min: 0 }, // base price per day
+        rate: { type: Number, required: true, min: 0 },
       },
       weekly: {
         enabled: { type: Boolean, default: false },
-        rate: { type: Number, default: 0 }, // flat price per week (optional override)
+        rate: { type: Number, default: 0 },
       },
-      // Tiered slabs for multi-day rentals
-      // Sorted by minDays ascending
-      // If no slab matches, full daily rate applies
       slabs: [pricingSlabSchema],
-      // Security deposit (refundable)
       deposit: { type: Number, default: 0 },
       currency: { type: String, default: "INR" },
     },
-    // Location
     location: {
       address: { type: String, default: "" },
       city: { type: String, required: [true, "City is required"] },
@@ -85,11 +76,9 @@ const productSchema = new mongoose.Schema(
       pincode: { type: String, default: "" },
       coordinates: {
         type: { type: String, enum: ["Point"], default: "Point" },
-        coordinates: { type: [Number], default: [0, 0] }, // [lng, lat]
+        coordinates: { type: [Number], default: [0, 0] },
       },
     },
-    // Availability: list of blocked date ranges
-    // When a booking is confirmed, we push to this array
     blockedDates: [
       {
         startDate: Date,
@@ -97,11 +86,10 @@ const productSchema = new mongoose.Schema(
         bookingId: { type: mongoose.Schema.Types.ObjectId, ref: "Booking" },
       },
     ],
-    // Rental rules set by owner
     rentalRules: {
       minRentalDays: { type: Number, default: 1 },
       maxRentalDays: { type: Number, default: 30 },
-      advanceBookingDays: { type: Number, default: 30 }, // how far ahead can be booked
+      advanceBookingDays: { type: Number, default: 30 },
       cancellationPolicy: {
         type: String,
         enum: ["flexible", "moderate", "strict"],
@@ -118,7 +106,6 @@ const productSchema = new mongoose.Schema(
       enum: ["active", "inactive", "rented", "under_review"],
       default: "active",
     },
-    // Ratings summary (updated when reviews come in)
     ratings: {
       average: { type: Number, default: 0, min: 0, max: 5 },
       count: { type: Number, default: 0 },
@@ -135,7 +122,6 @@ const productSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Indexes for search and filtering
 productSchema.index({ owner: 1 });
 productSchema.index({ category: 1 });
 productSchema.index({ "location.city": 1 });
@@ -143,7 +129,6 @@ productSchema.index({ "location.coordinates": "2dsphere" });
 productSchema.index({ "pricing.daily.rate": 1 });
 productSchema.index({ "ratings.average": -1 });
 productSchema.index({ status: 1 });
-// Text index for search
 productSchema.index(
   { title: "text", description: "text" },
   { weights: { title: 10, description: 5 } }

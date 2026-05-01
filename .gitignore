@@ -9,6 +9,9 @@ Server/node_modules/
 # Logs
 *.log
 
+# Runtime uploads
+Server/uploads/
+
 # Build files
 dist/
 build/
