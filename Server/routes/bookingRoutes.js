@@ -10,7 +10,7 @@ import {
   verifyRazorpayPayment,
   updateBookingStatus,
 } from "../controllers/bookingController.js";
-import protect from "../middleware/auth.js";
+import protect, { protectOptional } from "../middleware/auth.js";
 import validate from "../middleware/validate.js";
 import { bookingValidation } from "../validation/index.js";
 
@@ -19,6 +19,7 @@ const router = express.Router();
 // Checks if a product is available for selected dates
 router.get(
   "/availability",
+  protectOptional,
   validate(bookingValidation.availabilityQuery),
   checkBookingAvailability
 );

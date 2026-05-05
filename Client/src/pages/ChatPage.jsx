@@ -107,6 +107,8 @@ export default function ChatPage() {
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [composerText, setComposerText] = useState("");
   const [offerAmount, setOfferAmount] = useState("");
+  const [offerStartDate, setOfferStartDate] = useState("");
+  const [offerEndDate, setOfferEndDate] = useState("");
   const [sending, setSending] = useState(false);
   const [offerBusy, setOfferBusy] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
@@ -346,12 +348,17 @@ export default function ChatPage() {
   }, [loadMessages, selectedConversationId]);
 
   useEffect(() => {
-    const nextAmount =
-      selectedConversation?.negotiation?.finalDailyRate ??
-      selectedConversation?.product?.pricing?.daily?.rate ??
-      "";
-    setOfferAmount(nextAmount ? String(nextAmount) : "");
-  }, [selectedConversation?._id, selectedConversation?.negotiation?.finalDailyRate, selectedConversation?.product?.pricing?.daily?.rate]);
+    const timer = window.setTimeout(() => {
+      const nextAmount =
+        selectedConversation?.negotiation?.finalRate ??
+        selectedConversation?.product?.pricing?.daily?.rate ??
+        "";
+      setOfferAmount(nextAmount ? String(nextAmount) : "");
+      setOfferStartDate("");
+      setOfferEndDate("");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [selectedConversation?._id, selectedConversation?.negotiation?.finalRate, selectedConversation?.product?.pricing?.daily?.rate]);
 
   useEffect(() => {
     if (!selectedConversationId || !selectedConversation?.unreadCount) return undefined;
@@ -468,9 +475,17 @@ export default function ChatPage() {
     setError("");
 
     try {
-      const res = await api.post(`/chat/${selectedConversationId}/offers`, {
+      const payload = {
         amount: Number(offerAmount),
-      });
+      };
+
+      if (!selectedConversation?.booking) {
+        payload.pricingUnit = "daily";
+        payload.startDate = offerStartDate;
+        payload.endDate = offerEndDate;
+      }
+
+      const res = await api.post(`/chat/${selectedConversationId}/offers`, payload);
       const nextMessage = res.data?.data?.message;
       const nextConversation = res.data?.data?.conversation;
 
@@ -492,7 +507,15 @@ export default function ChatPage() {
     } finally {
       setOfferBusy(false);
     }
-  }, [loadConversations, offerAmount, selectedConversationId, upsertConversation]);
+  }, [
+    loadConversations,
+    offerAmount,
+    offerEndDate,
+    offerStartDate,
+    selectedConversation,
+    selectedConversationId,
+    upsertConversation,
+  ]);
 
   const handleOfferResponse = useCallback(async (messageId, action) => {
     if (!selectedConversationId || !messageId) return;
@@ -664,11 +687,11 @@ export default function ChatPage() {
                   ) : null}
                 </div>
                 {selectedConversation.negotiation?.status === "accepted" &&
-                selectedConversation.negotiation?.finalDailyRate ? (
+                selectedConversation.negotiation?.finalRate ? (
                   <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
                     Negotiated price locked for this chat:{" "}
                     {money(
-                      selectedConversation.negotiation.finalDailyRate,
+                      selectedConversation.negotiation.finalRate,
                       selectedConversation.negotiation.currency || "INR"
                     )}{" "}
                     per day.
@@ -815,12 +838,37 @@ export default function ChatPage() {
                         </label>
                         <Button
                           type="button"
-                          disabled={offerBusy || !Number(offerAmount)}
+                          disabled={
+                            offerBusy ||
+                            !Number(offerAmount) ||
+                            (!selectedConversation?.booking && (!offerStartDate || !offerEndDate))
+                          }
                           onClick={handleSendOffer}
                         >
                           {offerBusy ? "Sending..." : "Send offer"}
                         </Button>
                       </div>
+                      {!selectedConversation?.booking ? (
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <label className="space-y-2">
+                            <span className="text-xs font-extrabold text-black/70">Offer start date</span>
+                            <Input
+                              type="date"
+                              value={offerStartDate}
+                              onChange={(event) => setOfferStartDate(event.target.value)}
+                            />
+                          </label>
+                          <label className="space-y-2">
+                            <span className="text-xs font-extrabold text-black/70">Offer end date</span>
+                            <Input
+                              type="date"
+                              min={offerStartDate || undefined}
+                              value={offerEndDate}
+                              onChange={(event) => setOfferEndDate(event.target.value)}
+                            />
+                          </label>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   <Textarea

@@ -98,6 +98,15 @@ const conversationSchema = new mongoose.Schema(
         type: Number,
         default: null,
       },
+      finalRate: {
+        type: Number,
+        default: null,
+      },
+      finalPricingUnit: {
+        type: String,
+        enum: ["hourly", "daily", "weekly"],
+        default: "daily",
+      },
       currency: {
         type: String,
         default: "INR",

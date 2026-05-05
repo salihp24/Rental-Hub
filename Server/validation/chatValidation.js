@@ -13,6 +13,9 @@ const sendMessageBodySchema = Joi.object({
 
 const sendOfferBodySchema = Joi.object({
   amount: Joi.number().positive().precision(2).required(),
+  pricingUnit: Joi.string().valid("hourly", "daily", "weekly").default("daily"),
+  startDate: Joi.date().iso(),
+  endDate: Joi.date().iso().greater(Joi.ref("startDate")),
 }).required();
 
 const respondOfferBodySchema = Joi.object({

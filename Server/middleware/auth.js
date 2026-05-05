@@ -41,4 +41,29 @@ export const protect = asyncHandler(async (req, res, next) => {
   return next();
 });
 
+export const protectOptional = asyncHandler(async (req, res, next) => {
+  const token = getTokenFromRequest(req);
+
+  if (!token) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const currentUser = await User.findById(decoded.id);
+
+    if (!currentUser || !currentUser.isActive) {
+      req.user = null;
+      return next();
+    }
+
+    req.user = currentUser;
+    return next();
+  } catch (error) {
+    req.user = null;
+    return next();
+  }
+});
+
 export default protect;

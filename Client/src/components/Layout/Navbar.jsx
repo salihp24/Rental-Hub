@@ -14,12 +14,15 @@ export default function Navbar() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (location.pathname === "/products") {
-      setSearch(searchParams.get("search") || "");
-      return;
-    }
+    const timer = window.setTimeout(() => {
+      if (location.pathname === "/products") {
+        setSearch(searchParams.get("search") || "");
+        return;
+      }
+      setSearch("");
+    }, 0);
 
-    setSearch("");
+    return () => window.clearTimeout(timer);
   }, [location.pathname, searchParams]);
 
   const onLogout = async () => {

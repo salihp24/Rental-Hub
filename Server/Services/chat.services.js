@@ -144,7 +144,54 @@ const emitConversationUpdate = (io, conversation) => {
 };
 
 const buildOfferText = (amount, currency) =>
-  `Price proposal: ${currency} ${Number(amount).toFixed(2)} per day.`;
+  `Price proposal: ${currency} ${Number(amount).toFixed(2)}.`;
+
+const UNIT_LABEL = {
+  hourly: "hour",
+  daily: "day",
+  weekly: "week",
+};
+
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+const toUtcDateOnly = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new AppError("Invalid offer date.", 400);
+  }
+
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+};
+
+const toDateTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new AppError("Invalid offer date.", 400);
+  }
+
+  return date;
+};
+
+const dayDiff = (startDate, endDate) =>
+  Math.round((endDate.getTime() - startDate.getTime()) / DAY_IN_MS);
+
+const hourDiff = (startDate, endDate) =>
+  +((endDate.getTime() - startDate.getTime()) / (60 * 60 * 1000)).toFixed(2);
+
+const normalizeOfferWindow = (startDate, endDate, pricingUnit = "daily") => {
+  if (pricingUnit === "hourly") {
+    return { start: toDateTime(startDate), end: toDateTime(endDate) };
+  }
+  return { start: toUtcDateOnly(startDate), end: toUtcDateOnly(endDate) };
+};
+
+const getOfferTotalUnits = (startDate, endDate, pricingUnit = "daily") => {
+  const totalDays = pricingUnit === "hourly" ? +(hourDiff(startDate, endDate) / 24).toFixed(2) : dayDiff(startDate, endDate);
+  const totalHours = pricingUnit === "hourly" ? hourDiff(startDate, endDate) : totalDays * 24;
+  if (pricingUnit === "hourly") return totalHours;
+  if (pricingUnit === "weekly") return Math.ceil(totalDays / 7);
+  return totalDays;
+};
 
 const ensureNegotiationConversation = (conversation) => {
   if (!conversation.product) {
@@ -266,19 +313,25 @@ export const createConversationService = async (payload, user) => {
     return populateConversationById(conversation._id);
   }
 
-  const participantIds = dedupeObjectIds([user._id, ...(payload.participantIds || [])]);
+  let participantIds = dedupeObjectIds([user._id, ...(payload.participantIds || [])]);
+  if (payload.productId) {
+    const product = await Product.findById(payload.productId).select("_id owner");
+    if (!product) {
+      throw new AppError("Product not found.", 404);
+    }
+
+    if (String(product.owner) === String(user._id)) {
+      throw new AppError("You cannot start a product chat with yourself.", 400);
+    }
+
+    participantIds = dedupeObjectIds([user._id, product.owner]);
+  }
+
   if (participantIds.length < 2) {
     throw new AppError("A conversation needs at least two participants.", 400);
   }
 
   await ensureUsersExist(participantIds);
-
-  if (payload.productId) {
-    const product = await Product.findById(payload.productId).select("_id");
-    if (!product) {
-      throw new AppError("Product not found.", 404);
-    }
-  }
 
   const conversation = await Conversation.create({
     participants: participantIds,
@@ -406,6 +459,21 @@ export const sendOfferService = async (conversationId, payload, user, io = null)
   }
 
   const currency = conversation.product?.pricing?.currency || "INR";
+  const pricingUnit = payload.pricingUnit || conversation.booking?.pricingUnit || "daily";
+  if (!conversation.booking && (!payload.startDate || !payload.endDate)) {
+    throw new AppError("startDate and endDate are required for product-level negotiation offers.", 400);
+  }
+  const offerWindow = conversation.booking
+    ? normalizeOfferWindow(
+        conversation.booking.startDate,
+        conversation.booking.endDate,
+        conversation.booking.pricingUnit || "daily"
+      )
+    : normalizeOfferWindow(payload.startDate, payload.endDate, pricingUnit);
+  const totalUnits = conversation.booking
+    ? Number(conversation.booking.totalUnits || 0)
+    : getOfferTotalUnits(offerWindow.start, offerWindow.end, pricingUnit);
+
   const message = await Message.create({
     conversation: conversation._id,
     sender: user._id,
@@ -416,12 +484,18 @@ export const sendOfferService = async (conversationId, payload, user, io = null)
       currency,
       status: "pending",
       proposedBy: user._id,
+      booking: conversation.booking?._id || null,
+      product: conversation.product?._id || null,
+      startDate: offerWindow.start,
+      endDate: offerWindow.end,
+      pricingUnit,
+      totalUnits,
     },
     readBy: [{ user: user._id, readAt: new Date() }],
   });
 
   conversation.lastMessage = message._id;
-  conversation.lastMessageText = `Offered ${currency} ${Number(payload.amount).toFixed(2)} per day`;
+  conversation.lastMessageText = `Offered ${currency} ${Number(payload.amount).toFixed(2)} per ${UNIT_LABEL[pricingUnit] || "unit"}`;
   conversation.lastMessageAt = message.createdAt;
   conversation.negotiation = {
     ...(conversation.negotiation || {}),
@@ -491,19 +565,32 @@ export const respondToOfferService = async (
 
   const currency = offerMessage.offer.currency || conversation.product?.pricing?.currency || "INR";
   const amount = Number(offerMessage.offer.amount || 0);
+  const pricingUnit = offerMessage.offer.pricingUnit || conversation.booking?.pricingUnit || "daily";
+  const totalUnits =
+    Number(offerMessage.offer.totalUnits || 0) ||
+    Number(conversation.booking?.totalUnits || conversation.booking?.totalDays || 0);
 
   if (action === "accepted") {
-    offerMessage.text = `Price proposal accepted: ${currency} ${amount.toFixed(2)} per day.`;
+    if (
+      conversation.booking?._id &&
+      (conversation.booking.pricingUnit || "daily") !== pricingUnit
+    ) {
+      throw new AppError("Offer pricing unit does not match the booking pricing unit.", 400);
+    }
+
+    offerMessage.text = `Price proposal accepted: ${currency} ${amount.toFixed(2)} per ${pricingUnit}.`;
     conversation.negotiation = {
       ...(conversation.negotiation || {}),
       activeOffer: null,
       acceptedOffer: offerMessage._id,
+      finalRate: amount,
+      finalPricingUnit: pricingUnit,
       finalDailyRate: amount,
       currency,
       status: "accepted",
       updatedAt: new Date(),
     };
-    conversation.lastMessageText = `Accepted ${currency} ${amount.toFixed(2)} per day`;
+    conversation.lastMessageText = `Accepted ${currency} ${amount.toFixed(2)} per ${pricingUnit}`;
 
     if (conversation.booking?._id) {
       const [booking, product] = await Promise.all([
@@ -516,10 +603,10 @@ export const respondToOfferService = async (
       }
 
       booking.pricingSnapshot = {
-        ...computePricing(product.pricing, booking.totalUnits || booking.totalDays, {
+        ...computePricing(product.pricing, totalUnits, {
           baseRateOverride: amount,
           currencyOverride: currency,
-          pricingUnit: booking.pricingUnit || "daily",
+          pricingUnit,
         }),
         negotiatedRate: amount,
         isNegotiated: true,
@@ -529,23 +616,23 @@ export const respondToOfferService = async (
       await booking.save();
     }
   } else if (action === "rejected") {
-    offerMessage.text = `Price proposal rejected: ${currency} ${amount.toFixed(2)} per day.`;
+    offerMessage.text = `Price proposal rejected: ${currency} ${amount.toFixed(2)} per ${pricingUnit}.`;
     conversation.negotiation = {
       ...(conversation.negotiation || {}),
       activeOffer: null,
       status: conversation.negotiation?.acceptedOffer ? "accepted" : "rejected",
       updatedAt: new Date(),
     };
-    conversation.lastMessageText = `Rejected ${currency} ${amount.toFixed(2)} per day`;
+    conversation.lastMessageText = `Rejected ${currency} ${amount.toFixed(2)} per ${pricingUnit}`;
   } else {
-    offerMessage.text = `Price proposal cancelled: ${currency} ${amount.toFixed(2)} per day.`;
+    offerMessage.text = `Price proposal cancelled: ${currency} ${amount.toFixed(2)} per ${pricingUnit}.`;
     conversation.negotiation = {
       ...(conversation.negotiation || {}),
       activeOffer: null,
       status: conversation.negotiation?.acceptedOffer ? "accepted" : "none",
       updatedAt: new Date(),
     };
-    conversation.lastMessageText = `Cancelled ${currency} ${amount.toFixed(2)} per day`;
+    conversation.lastMessageText = `Cancelled ${currency} ${amount.toFixed(2)} per ${pricingUnit}`;
   }
 
   await offerMessage.save();
@@ -558,25 +645,55 @@ export const respondToOfferService = async (
   return emitMessageAndConversation(io, conversation._id, offerMessage._id);
 };
 
-export const getAcceptedNegotiationForBookingService = async ({ productId, renterId, ownerId }) => {
-  const conversation = await Conversation.findOne({
+export const getAcceptedNegotiationForBookingService = async ({
+  productId,
+  renterId,
+  ownerId,
+  bookingId = null,
+  startDate = null,
+  endDate = null,
+  pricingUnit = "daily",
+}) => {
+  const conversations = await Conversation.find({
     product: productId,
     participants: { $all: [renterId, ownerId] },
-    "negotiation.status": "accepted",
-    "negotiation.finalDailyRate": { $gt: 0 },
-  })
-    .sort({ "negotiation.updatedAt": -1 })
-    .populate(CONVERSATION_POPULATE);
+  }).select("_id");
 
-  if (!conversation?.negotiation?.finalDailyRate) {
+  if (!conversations.length) {
+    return null;
+  }
+
+  const query = {
+    conversation: { $in: conversations.map((conversation) => conversation._id) },
+    type: "offer",
+    "offer.status": "accepted",
+    "offer.product": productId,
+    "offer.pricingUnit": pricingUnit,
+  };
+
+  if (bookingId) {
+    query["offer.booking"] = bookingId;
+  } else if (startDate && endDate) {
+    const normalized = normalizeOfferWindow(startDate, endDate, pricingUnit);
+    query["offer.startDate"] = normalized.start;
+    query["offer.endDate"] = normalized.end;
+  }
+
+  const acceptedOffer = await Message.findOne(query).sort({ "offer.respondedAt": -1 });
+
+  if (!acceptedOffer?.offer?.amount) {
     return null;
   }
 
   return {
-    conversationId: conversation._id,
-    amount: Number(conversation.negotiation.finalDailyRate),
-    currency: conversation.negotiation.currency || conversation.product?.pricing?.currency || "INR",
-    acceptedOfferId: conversation.negotiation.acceptedOffer?._id || conversation.negotiation.acceptedOffer,
+    conversationId: acceptedOffer.conversation,
+    amount: Number(acceptedOffer.offer.amount),
+    currency: acceptedOffer.offer.currency || "INR",
+    acceptedOfferId: acceptedOffer._id,
+    pricingUnit: acceptedOffer.offer.pricingUnit || pricingUnit,
+    bookingId: acceptedOffer.offer.booking || null,
+    startDate: acceptedOffer.offer.startDate || null,
+    endDate: acceptedOffer.offer.endDate || null,
   };
 };
 

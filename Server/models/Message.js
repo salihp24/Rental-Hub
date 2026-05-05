@@ -63,6 +63,27 @@ const messageSchema = new mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
       },
+      booking: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Booking",
+        default: null,
+      },
+      product: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Product",
+        default: null,
+      },
+      startDate: Date,
+      endDate: Date,
+      pricingUnit: {
+        type: String,
+        enum: ["hourly", "daily", "weekly"],
+        default: "daily",
+      },
+      totalUnits: {
+        type: Number,
+        default: 0,
+      },
       respondedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",

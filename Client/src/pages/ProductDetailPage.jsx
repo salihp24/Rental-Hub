@@ -366,7 +366,10 @@ export default function ProductDetailPage() {
                     <Input
                       type="datetime-local"
                       value={startDateTime}
-                      onChange={(e) => setStartDateTime(e.target.value)}
+                      onChange={(e) => {
+                        setStartDateTime(e.target.value);
+                        setAvailability(null);
+                      }}
                       required
                     />
                   </label>
@@ -376,7 +379,10 @@ export default function ProductDetailPage() {
                       type="datetime-local"
                       value={endDateTime}
                       min={startDateTime}
-                      onChange={(e) => setEndDateTime(e.target.value)}
+                      onChange={(e) => {
+                        setEndDateTime(e.target.value);
+                        setAvailability(null);
+                      }}
                       required
                     />
                   </label>
@@ -389,7 +395,10 @@ export default function ProductDetailPage() {
                       type="date"
                       min={todayIso()}
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        setAvailability(null);
+                      }}
                       required
                     />
                   </label>
@@ -399,7 +408,10 @@ export default function ProductDetailPage() {
                       type="date"
                       min={startDate}
                       value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
+                      onChange={(e) => {
+                        setEndDate(e.target.value);
+                        setAvailability(null);
+                      }}
                       required
                     />
                   </label>

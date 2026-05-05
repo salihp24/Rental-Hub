@@ -377,6 +377,44 @@ const calculateRefundAmount = (booking, product, statusOverride = booking.status
 const populateBookingById = (bookingId) =>
   Booking.findById(bookingId).populate(BOOKING_POPULATE);
 
+const autoInitiateReturnIfOverdue = async (booking) => {
+  if (!booking || booking.status !== "active") {
+    return booking;
+  }
+
+  const bookingEnd = toDateTime(booking.endDate);
+  if (bookingEnd > new Date()) {
+    return booking;
+  }
+
+  booking.status = "return_requested";
+  booking.returnFlow = {
+    ...booking.returnFlow,
+    requestedAt: booking.returnFlow?.requestedAt || new Date(),
+    requestedBy: booking.returnFlow?.requestedBy || null,
+  };
+
+  await booking.save();
+  return booking;
+};
+
+const autoInitiateReturnsForFilter = async (baseFilter = {}) => {
+  await Booking.updateMany(
+    {
+      ...baseFilter,
+      status: "active",
+      endDate: { $lte: new Date() },
+    },
+    {
+      $set: {
+        status: "return_requested",
+        "returnFlow.requestedAt": new Date(),
+        "returnFlow.requestedBy": null,
+      },
+    }
+  );
+};
+
 // Checks if a product is available for selected dates
 export const getBookingAvailabilityService = async ({
   productId,
@@ -406,6 +444,9 @@ export const getBookingAvailabilityService = async ({
           productId: product._id,
           renterId: user._id,
           ownerId: product.owner,
+          startDate: start,
+          endDate: end,
+          pricingUnit,
         })
       : null;
 
@@ -458,6 +499,9 @@ export const createBookingService = async (payload, renter) => {
     productId: product._id,
     renterId: renter._id,
     ownerId: product.owner,
+    startDate: start,
+    endDate: end,
+    pricingUnit,
   });
 
   const pricingSnapshot = computePricing(product.pricing, duration.totalUnits, {
@@ -494,6 +538,14 @@ export const listMyBookingsService = async (userId, query) => {
   const filter = buildListFilter(userId, query);
   const skip = (Number(page) - 1) * Number(limit);
 
+  await autoInitiateReturnsForFilter(
+    filter.$or
+      ? { $or: filter.$or }
+      : filter.owner
+        ? { owner: filter.owner }
+        : { renter: filter.renter }
+  );
+
   const [bookings, total] = await Promise.all([
     Booking.find(filter)
       .populate(BOOKING_POPULATE)
@@ -513,13 +565,21 @@ export const listMyBookingsService = async (userId, query) => {
 
 // Fetch single booking
 export const getBookingByIdService = async (bookingId, user) => {
+  const rawBooking = await Booking.findById(bookingId);
+
+  if (!rawBooking) {
+    throw new AppError("Booking not found.", 404);
+  }
+
+  ensureBookingAccess(rawBooking, user);
+  await autoInitiateReturnIfOverdue(rawBooking);
+
   const booking = await populateBookingById(bookingId);
 
   if (!booking) {
     throw new AppError("Booking not found.", 404);
   }
 
-  ensureBookingAccess(booking, user);
   return booking;
 };
 
@@ -650,6 +710,7 @@ export const updateBookingStatusService = async (bookingId, payload, user) => {
   }
 
   hydrateLegacyBookingFields(booking);
+  await autoInitiateReturnIfOverdue(booking);
 
   const currentStatus = booking.status;
   const nextStatus = payload.status;
@@ -784,6 +845,7 @@ export const updateBookingStatusService = async (bookingId, payload, user) => {
       confirmedAt: new Date(),
       confirmedBy: user._id,
     };
+    await removeBlockedRange(booking.product, booking._id);
     await Product.updateOne({ _id: booking.product }, { $inc: { totalRentals: 1 } });
   }
 

@@ -114,12 +114,13 @@ function BookingCard({ booking, mode, onAction, busyId }) {
     booking.status === "confirmed" &&
     booking.paymentStatus === "paid";
   const canOwnerConfirmReturn = mode === "owner" && booking.status === "return_requested";
+  const canOwnerCancel = mode === "owner" && ["pending", "confirmed"].includes(booking.status);
   const canCancel = mode === "renter" && ["pending", "confirmed"].includes(booking.status);
+  const canRenterRequestReturn = mode === "renter" && booking.status === "active";
   const canConfirmPayment =
     mode === "renter" &&
     booking.status === "confirmed" &&
     booking.paymentStatus === "unpaid";
-  const canRequestReturn = mode === "renter" && booking.status === "active";
   const unitLabel = booking.pricingUnit === "hourly" ? "hours" : booking.pricingUnit === "weekly" ? "weeks" : "days";
   const durationLabel =
     booking.pricingUnit === "hourly"
@@ -192,7 +193,8 @@ function BookingCard({ booking, mode, onAction, busyId }) {
 
       {booking.returnFlow?.requestedAt ? (
         <div className="mt-3 rounded-xl bg-black/[0.03] px-3 py-2 text-xs font-semibold text-black/60">
-          Return requested on {formatDateTime(booking.returnFlow.requestedAt)}
+          {booking.returnFlow?.requestedBy ? "Return requested" : "Auto return initiated"} on{" "}
+          {formatDateTime(booking.returnFlow.requestedAt)}
           {booking.returnFlow?.confirmedAt
             ? ` | Confirmed on ${formatDateTime(booking.returnFlow.confirmedAt)}`
             : ""}
@@ -265,18 +267,9 @@ function BookingCard({ booking, mode, onAction, busyId }) {
           </Button>
         ) : null}
 
-        {canRequestReturn ? (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={() =>
-              onAction(booking._id, "status", {
-                status: "return_requested",
-              })
-            }
-          >
-            Request return
+        {mode === "owner" && !canOwnerConfirmReturn ? (
+          <Button type="button" variant="secondary" disabled>
+            Confirm return
           </Button>
         ) : null}
 
@@ -292,6 +285,36 @@ function BookingCard({ booking, mode, onAction, busyId }) {
             }
           >
             Cancel
+          </Button>
+        ) : null}
+
+        {canOwnerCancel ? (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={busy}
+            onClick={() =>
+              onAction(booking._id, "cancel", {
+                reason: "Cancelled by owner from account page.",
+              })
+            }
+          >
+            Cancel booking
+          </Button>
+        ) : null}
+
+        {canRenterRequestReturn ? (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={() =>
+              onAction(booking._id, "status", {
+                status: "return_requested",
+              })
+            }
+          >
+            Request return
           </Button>
         ) : null}
 
@@ -332,13 +355,23 @@ function BookingCard({ booking, mode, onAction, busyId }) {
 
       {mode === "renter" && booking.status === "active" ? (
         <div className="mt-3 text-xs font-semibold text-black/50">
-          The rental is in progress. Request a return once you hand the item back.
+          The rental is in progress. Return will auto-initiate after {formatDateTime(booking.endDate)}.
         </div>
       ) : null}
 
       {mode === "renter" && booking.status === "return_requested" ? (
         <div className="mt-3 text-xs font-semibold text-black/50">
-          Return requested. Waiting for the owner to confirm the item was received back.
+          {booking.returnFlow?.requestedBy
+            ? "Return requested."
+            : "Return auto-initiated after rental end."}{" "}
+          Waiting for the owner to confirm the item was received back.
+        </div>
+      ) : null}
+
+      {mode === "renter" &&
+      !["active", "return_requested", "completed", "cancelled", "rejected"].includes(booking.status) ? (
+        <div className="mt-3 text-xs font-semibold text-black/45">
+          Return actions become available after the booking is active and the rental end time passes.
         </div>
       ) : null}
 
