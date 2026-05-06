@@ -10,6 +10,12 @@ import LoginPage from "./pages/LoginPage";
 import ProductBrowsePage from "./pages/ProductBrowsePage";
 import RegisterPage from "./pages/RegisterPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
+import AdminLayout from "./pages/admin/AdminLayout";
+import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
+import AdminUsersPage from "./pages/admin/AdminUsersPage";
+import AdminProductsPage from "./pages/admin/AdminProductsPage";
+import AdminBookingsPage from "./pages/admin/AdminBookingsPage";
+import AdminAuditLogsPage from "./pages/admin/AdminAuditLogsPage";
 import { fetchCurrentUser } from "./store/slices/authSlice";
 
 function RequireAuth({ children }) {
@@ -18,6 +24,16 @@ function RequireAuth({ children }) {
 
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return children;
+}
+
+function RequireAdmin({ children }) {
+  const { user } = useSelector((s) => s.auth);
+
+  if (!user?.role?.includes("admin")) {
+    return <Navigate to="/" replace />;
   }
 
   return children;
@@ -73,6 +89,22 @@ export default function App() {
             </RequireAuth>
           }
         />
+        <Route
+          path="admin"
+          element={
+            <RequireAuth>
+              <RequireAdmin>
+                <AdminLayout />
+              </RequireAdmin>
+            </RequireAuth>
+          }
+        >
+          <Route index element={<AdminDashboardPage />} />
+          <Route path="users" element={<AdminUsersPage />} />
+          <Route path="products" element={<AdminProductsPage />} />
+          <Route path="bookings" element={<AdminBookingsPage />} />
+          <Route path="audit-logs" element={<AdminAuditLogsPage />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

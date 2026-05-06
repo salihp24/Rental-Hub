@@ -146,6 +146,18 @@ export default function Navbar() {
               >
                 {profileLabel}
               </NavLink>
+              {user?.role?.includes("admin") ? (
+                <NavLink
+                  to="/admin"
+                  className={({ isActive }) =>
+                    `inline-flex rounded-xl px-2.5 py-2 text-xs font-semibold md:px-3 md:text-sm ${
+                      isActive ? "bg-black/10 text-black" : "text-black/80 hover:bg-black/5"
+                    }`
+                  }
+                >
+                  Admin
+                </NavLink>
+              ) : null}
               <Button variant="secondary" onClick={onLogout}>
                 Logout
               </Button>

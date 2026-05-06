@@ -29,6 +29,7 @@
   import bookingRoutes from "./routes/bookingRoutes.js";
   import chatRoutes from "./routes/chatRoutes.js";
   import uploadRoutes from "./routes/uploadRoutes.js";
+  import adminRoutes from "./routes/admin/adminRoutes.js";
   import registerChatSocket from "./socket/chatSocket.js";
   import Conversation from "./models/Conversation.js";
 
@@ -105,6 +106,14 @@
     message: { status: "fail", message: "Too many chat requests, please slow down a bit." },
   });
 
+  const adminLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: isDevelopment ? 500 : 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { status: "fail", message: "Too many admin requests, please slow down." },
+  });
+
   // Lightweight health check for local testing and monitoring.
   app.get("/api/v1/health", (req, res) => {
     res.status(200).json({
@@ -122,6 +131,7 @@
   app.use("/api/v1/bookings", bookingRoutes);
   app.use("/api/v1/chat", chatLimiter, chatRoutes);
   app.use("/api/v1/uploads", uploadRoutes);
+  app.use("/api/v1/admin", adminLimiter, adminRoutes);
 
   app.use(notFound);
   //handles all errors globally
@@ -144,6 +154,14 @@
   const startServer = async () => {
     await connectDB();
     await ensureConversationIndexes();
+
+    server.once("error", (err) => {
+      if (err?.code === "EADDRINUSE") {
+        console.error(`Port ${PORT} is already in use. Stop the existing process or start with a different PORT.`);
+        process.exit(1);
+      }
+      throw err;
+    });
 
     server.listen(PORT, () => {
       console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);

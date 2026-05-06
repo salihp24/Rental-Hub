@@ -27,8 +27,22 @@ export const createProductService = async (data, user) => {
 
   // Create the product with the request payload.
   // We also set the current user as owner and generate a unique slug.
+  const isAdmin = user.hasRole("admin");
+  const requestedStatus = data.status;
+  const safeStatus = isAdmin
+    ? requestedStatus || "active"
+    : "under_review";
+
   const product = await Product.create({
     ...data,
+    status: safeStatus,
+    isFeatured: isAdmin ? Boolean(data.isFeatured) : false,
+    moderation: {
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewNote: "",
+      rejectionReason: "",
+    },
     owner: user._id,
     // Generates a URL-friendly unique string.
     // Example: "iPhone 15 Pro" -> "iphone-15-pro"
@@ -210,6 +224,18 @@ export const updateProductService = async (productId, data, user) => {
   if (!isOwner && !isAdmin)
     throw new AppError("Not allowed to update.", 403);
 
+  if (!isAdmin) {
+    if (Object.prototype.hasOwnProperty.call(data, "status")) {
+      throw new AppError("Only admins can change product status.", 403);
+    }
+    if (Object.prototype.hasOwnProperty.call(data, "isFeatured")) {
+      throw new AppError("Only admins can change featured status.", 403);
+    }
+    if (Object.prototype.hasOwnProperty.call(data, "moderation")) {
+      throw new AppError("Only admins can update moderation fields.", 403);
+    }
+  }
+
   if (data.title && data.title !== product.title) {
     // If title changes, generate a fresh slug.
     // Passing the current product id avoids treating its own slug as duplicate.
@@ -245,7 +271,23 @@ export const updateProductService = async (productId, data, user) => {
   }
 
   // Apply the update and keep Mongoose validation enabled.
-  return await Product.findByIdAndUpdate(productId, data, {
+  const mutableData = { ...data };
+
+  if (!isAdmin) {
+    const nonStatusFields = Object.keys(mutableData).filter((key) => key !== "status");
+    if (product.status === "active" && nonStatusFields.length > 0) {
+      mutableData.status = "under_review";
+      mutableData.moderation = {
+        ...product.moderation?.toObject?.(),
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewNote: "",
+        rejectionReason: "",
+      };
+    }
+  }
+
+  return await Product.findByIdAndUpdate(productId, mutableData, {
     new: true,
     runValidators: true,
   }).select("-__v");

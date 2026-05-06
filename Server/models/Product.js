@@ -118,6 +118,27 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    moderation: {
+      reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      reviewedAt: {
+        type: Date,
+        default: null,
+      },
+      reviewNote: {
+        type: String,
+        default: "",
+        maxlength: 500,
+      },
+      rejectionReason: {
+        type: String,
+        default: "",
+        maxlength: 500,
+      },
+    },
   },
   { timestamps: true }
 );

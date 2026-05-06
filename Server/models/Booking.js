@@ -187,7 +187,6 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ renter: 1 });
 bookingSchema.index({ owner: 1 });
 bookingSchema.index({ product: 1 });
-bookingSchema.index({ orderCode: 1 }, { unique: true });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ startDate: 1, endDate: 1 });
 

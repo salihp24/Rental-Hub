@@ -6,3 +6,4 @@ export { productValidation } from "./productValidation.js";
 export { bookingValidation } from "./bookingValidation.js";
 export { chatValidation } from "./chatValidation.js";
 export { reviewValidation } from "./reviewValidation.js";
+export { adminValidation } from "./admin/adminValidation.js";

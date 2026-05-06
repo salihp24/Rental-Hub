@@ -201,14 +201,14 @@ const ensureRenterAccess = (booking, user) => {
 };
 
 const isOwnerOrAdmin = (booking, user) => {
-  const isOwner = booking.owner.equals(user._id);
+  const isOwner = booking?.owner?.equals?.(user._id) || String(booking?.owner) === String(user?._id);
   const isAdmin = user.hasRole("admin");
 
   return isOwner || isAdmin;
 };
 
 const isRenterOrAdmin = (booking, user) => {
-  const isRenter = booking.renter.equals(user._id);
+  const isRenter = booking?.renter?.equals?.(user._id) || String(booking?.renter) === String(user?._id);
   const isAdmin = user.hasRole("admin");
 
   return isRenter || isAdmin;
@@ -707,6 +707,13 @@ export const updateBookingStatusService = async (bookingId, payload, user) => {
 
   if (!booking) {
     throw new AppError("Booking not found.", 404);
+  }
+
+  if (!booking.owner || !booking.renter || !booking.product) {
+    throw new AppError(
+      "Booking data is incomplete (owner/renter/product missing). Please repair this booking record first.",
+      400
+    );
   }
 
   hydrateLegacyBookingFields(booking);
