@@ -4,9 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node Server/server.js",
     "server": "node Server/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "test:server": "node Server/tests/runAdminSmokeTests.js"
+    "build": "npm --prefix Client run build",
+    "build:client": "npm --prefix Client run build",
+    "test": "npm run test:server && npm run test:booking",
+    "test:server": "node Server/tests/runAdminSmokeTests.js",
+    "test:booking": "node Server/tests/runBookingPaymentReturnSmokeTests.js"
   },
   "keywords": [],
   "author": "",

@@ -1,5 +1,7 @@
 import Booking from "../models/Booking.js";
 import Product from "../models/Product.js";
+import User from "../models/User.js";
+import mongoose from "mongoose";
 import AppError from "../utils/AppError.js";
 import { computePricing } from "../utils/Pricing.js";
 import Razorpay from "razorpay";
@@ -149,6 +151,16 @@ const issueRazorpayRefund = async (booking, amount) => {
   const refundAmount = Number(amount || 0);
   if (refundAmount <= 0) return null;
 
+  const existingRefundId = booking.paymentDetails?.refundId;
+  const existingRefundAmount = Number(booking.paymentDetails?.refundAmount || 0);
+  if (existingRefundId && existingRefundAmount >= refundAmount) {
+    return {
+      id: existingRefundId,
+      status: booking.paymentDetails?.refundStatus || "processed",
+      amount: Math.round(existingRefundAmount * 100),
+    };
+  }
+
   const paymentId = booking.paymentDetails?.razorpayPaymentId;
   if (!paymentId) {
     throw new AppError("Cannot refund this booking because no Razorpay payment id is stored.", 400);
@@ -251,7 +263,7 @@ const getConflictingBlocks = (product, startDate, endDate, excludeBookingId = nu
   });
 
   // Blocks dates after booking confirmed
-const addBlockedRange = async (productId, bookingId, startDate, endDate) => {
+const addBlockedRange = async (productId, bookingId, startDate, endDate, session = null) => {
   await Product.updateOne(
     { _id: productId },
     {
@@ -262,20 +274,106 @@ const addBlockedRange = async (productId, bookingId, startDate, endDate) => {
           bookingId,
         },
       },
-    }
+    },
+    session ? { session } : {}
   );
 };
 
 // Frees dates when: booking cancelled, rejected
-const removeBlockedRange = async (productId, bookingId) => {
+const removeBlockedRange = async (productId, bookingId, session = null) => {
   await Product.updateOne(
     { _id: productId },
     {
       $pull: {
         blockedDates: { bookingId },
       },
-    }
+    },
+    session ? { session } : {}
   );
+};
+
+const confirmBookingAtomically = async (bookingId, payload, user) => {
+  if (mongoose.connection?.readyState !== 1) {
+    return null;
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    let confirmedBookingId = null;
+
+    await session.withTransaction(async () => {
+      const booking = await Booking.findById(bookingId).session(session);
+      if (!booking) {
+        throw new AppError("Booking not found.", 404);
+      }
+
+      if (!booking.owner || !booking.renter || !booking.product) {
+        throw new AppError(
+          "Booking data is incomplete (owner/renter/product missing). Please repair this booking record first.",
+          400
+        );
+      }
+
+      if (!isOwnerOrAdmin(booking, user)) {
+        throw new AppError("Only the owner can update this booking status.", 403);
+      }
+
+      if (!user.hasRole("admin") && user.ownerProfile?.activitySuspended) {
+        throw new AppError("Owner activity is suspended. Booking status updates are disabled.", 403);
+      }
+
+      if (booking.status !== "pending") {
+        if (booking.status === "confirmed") {
+          throw new AppError("Booking is already in that status.", 400);
+        }
+        throw new AppError(`Cannot change booking status from ${booking.status} to confirmed.`, 400);
+      }
+
+      const product = await Product.findById(booking.product).select("blockedDates").session(session);
+      if (!product) {
+        throw new AppError("Product not found for this booking.", 404);
+      }
+
+      const conflicts = getConflictingBlocks(
+        product,
+        toDateTime(booking.startDate),
+        toDateTime(booking.endDate),
+        booking._id
+      );
+      if (conflicts.length) {
+        throw new AppError("This booking can no longer be confirmed because the dates are unavailable.", 409);
+      }
+
+      await Product.updateOne(
+        { _id: booking.product },
+        {
+          $addToSet: {
+            blockedDates: {
+              startDate: booking.startDate,
+              endDate: booking.endDate,
+              bookingId: booking._id,
+            },
+          },
+        },
+        { session }
+      );
+
+      booking.status = "confirmed";
+      if (payload?.paymentStatus) {
+        booking.paymentStatus = payload.paymentStatus;
+      }
+      await booking.save({ session });
+      confirmedBookingId = booking._id;
+    });
+
+    if (!confirmedBookingId) {
+      return null;
+    }
+
+    return populateBookingById(confirmedBookingId);
+  } finally {
+    await session.endSession();
+  }
 };
 
 // Booking Validation
@@ -370,6 +468,216 @@ const calculateRefundAmount = (booking, product, statusOverride = booking.status
   return +(totalAmount * rate).toFixed(2);
 };
 
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const calculateEarlyReturnSettlement = (booking) => {
+  if (!booking || booking.paymentStatus !== "paid") {
+    return null;
+  }
+
+  const requestedAt = booking.returnFlow?.requestedAt
+    ? toDateTime(booking.returnFlow.requestedAt)
+    : null;
+  if (!requestedAt) return null;
+
+  const start = toDateTime(booking.startDate);
+  const end = toDateTime(booking.endDate);
+
+  // Early-return settlement applies only when return is requested after rental starts
+  // and before the scheduled rental end.
+  if (requestedAt < start || requestedAt >= end) {
+    return null;
+  }
+
+  const pricingUnit = booking.pricingUnit || booking.pricingSnapshot?.pricingUnit || "daily";
+  const totalUnits = Number(booking.totalUnits || 0);
+  if (totalUnits <= 0) return null;
+
+  const totalAmount = Number(
+    booking.pricingSnapshot?.rentalAmount || booking.pricingSnapshot?.totalAmount || 0
+  );
+  if (totalAmount <= 0) return null;
+
+  const elapsedMs = Math.max(0, requestedAt.getTime() - start.getTime());
+  const elapsedDays = elapsedMs / DAY_IN_MS;
+  const elapsedHours = elapsedMs / HOUR_IN_MS;
+
+  let usedUnits = 1;
+  if (pricingUnit === "hourly") {
+    usedUnits = Math.ceil(Math.max(1, elapsedHours) * 100) / 100;
+  } else if (pricingUnit === "weekly") {
+    usedUnits = Math.ceil(Math.max(1, elapsedDays) / 7);
+  } else {
+    usedUnits = Math.ceil(Math.max(1, elapsedDays));
+  }
+
+  usedUnits = clamp(usedUnits, 1, totalUnits);
+  const unusedUnits = Math.max(0, totalUnits - usedUnits);
+  if (unusedUnits <= 0) return null;
+
+  const refundRate = clamp(Number(process.env.EARLY_RETURN_UNUSED_REFUND_RATE ?? 0.5), 0, 1);
+  const perUnitAmount = totalAmount / totalUnits;
+  const refundableUnusedAmount = perUnitAmount * unusedUnits;
+  const refundAmount = +Math.min(
+    Number(booking.pricingSnapshot?.totalAmount || totalAmount),
+    refundableUnusedAmount * refundRate
+  ).toFixed(2);
+
+  if (refundAmount <= 0) return null;
+
+  const chargeAmount = +(totalAmount - refundAmount).toFixed(2);
+  return {
+    policy: "early_return_unused_units",
+    refundRateApplied: refundRate,
+    usedUnits: +usedUnits.toFixed(2),
+    totalUnits: +totalUnits.toFixed(2),
+    unusedUnits: +unusedUnits.toFixed(2),
+    chargeAmount,
+    refundAmount,
+  };
+};
+
+const enforceNegotiationMinimumUnits = (acceptedNegotiation, duration) => {
+  const requiredUnits = Number(acceptedNegotiation?.totalUnits || 0);
+  if (!requiredUnits || requiredUnits <= 0) return;
+
+  if (Number(duration?.totalUnits || 0) < requiredUnits) {
+    const unitLabel =
+      acceptedNegotiation.pricingUnit === "weekly"
+        ? "week(s)"
+        : acceptedNegotiation.pricingUnit === "hourly"
+          ? "hour(s)"
+          : "day(s)";
+    throw new AppError(
+      `This accepted offer requires at least ${requiredUnits} ${unitLabel}.`,
+      400
+    );
+  }
+};
+
+const updateOwnerTrustedSellerStatus = async (ownerId, outcome) => {
+  if (!ownerId) return;
+
+  if (mongoose.connection?.readyState === 1 && typeof User.updateOne === "function") {
+    if (outcome === "completed") {
+      await User.updateOne(
+        { _id: ownerId },
+        [
+          {
+            $set: {
+              "ownerProfile.trustedSeller": {
+                $let: {
+                  vars: {
+                    current: { $ifNull: ["$ownerProfile.trustedSeller", {}] },
+                    nextStreak: {
+                      $add: [
+                        { $ifNull: ["$ownerProfile.trustedSeller.completedReturnStreak", 0] },
+                        1,
+                      ],
+                    },
+                  },
+                  in: {
+                    manualOverride: {
+                      $cond: [
+                        { $in: ["$$current.manualOverride", [true, false]] },
+                        "$$current.manualOverride",
+                        null,
+                      ],
+                    },
+                    completedReturnStreak: "$$nextStreak",
+                    autoQualified: { $gte: ["$$nextStreak", 2] },
+                    qualifiedAt: {
+                      $cond: [
+                        { $gte: ["$$nextStreak", 2] },
+                        { $ifNull: ["$$current.qualifiedAt", "$$NOW"] },
+                        null,
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ]
+        ,
+        { updatePipeline: true }
+      );
+      return;
+    }
+
+    if (outcome === "unsuccessful") {
+      await User.updateOne(
+        { _id: ownerId },
+        [
+          {
+            $set: {
+              "ownerProfile.trustedSeller": {
+                $let: {
+                  vars: { current: { $ifNull: ["$ownerProfile.trustedSeller", {}] } },
+                  in: {
+                    manualOverride: {
+                      $cond: [
+                        { $in: ["$$current.manualOverride", [true, false]] },
+                        "$$current.manualOverride",
+                        null,
+                      ],
+                    },
+                    completedReturnStreak: 0,
+                    autoQualified: false,
+                    qualifiedAt: null,
+                  },
+                },
+              },
+            },
+          },
+        ]
+        ,
+        { updatePipeline: true }
+      );
+      return;
+    }
+  }
+
+  const owner = await User.findById(ownerId).select("ownerProfile");
+  if (!owner) return;
+
+  const trustedSeller = owner.ownerProfile?.trustedSeller || {};
+  const next = {
+    manualOverride:
+      trustedSeller.manualOverride === true || trustedSeller.manualOverride === false
+        ? trustedSeller.manualOverride
+        : null,
+    autoQualified: Boolean(trustedSeller.autoQualified),
+    completedReturnStreak: Number(trustedSeller.completedReturnStreak || 0),
+    qualifiedAt: trustedSeller.qualifiedAt || null,
+  };
+
+  if (outcome === "completed") {
+    next.completedReturnStreak += 1;
+    const qualifiesNow = next.completedReturnStreak >= 2;
+    if (qualifiesNow && !next.autoQualified) {
+      next.qualifiedAt = new Date();
+    }
+    next.autoQualified = qualifiesNow;
+  } else if (outcome === "unsuccessful") {
+    next.completedReturnStreak = 0;
+    next.autoQualified = false;
+    next.qualifiedAt = null;
+  } else {
+    return;
+  }
+
+  const nextOwnerProfile = {
+    ...(owner.ownerProfile?.toObject?.() || owner.ownerProfile || {}),
+    trustedSeller: next,
+  };
+
+  owner.ownerProfile = nextOwnerProfile;
+  if (typeof owner.save === "function") {
+    await owner.save({ validateBeforeSave: false });
+  }
+};
+
 
 // Main Services
 
@@ -382,9 +690,19 @@ const autoInitiateReturnIfOverdue = async (booking) => {
     return booking;
   }
 
-  const bookingEnd = toDateTime(booking.endDate);
-  if (bookingEnd > new Date()) {
-    return booking;
+  const pricingUnit = booking.pricingUnit || booking.pricingSnapshot?.pricingUnit || "daily";
+  const now = new Date();
+  if (pricingUnit === "hourly") {
+    const bookingEnd = toDateTime(booking.endDate);
+    if (bookingEnd > now) {
+      return booking;
+    }
+  } else {
+    const nowUtcDay = toUtcDateOnly(now);
+    const bookingEndUtcDay = toUtcDateOnly(booking.endDate);
+    if (nowUtcDay <= bookingEndUtcDay) {
+      return booking;
+    }
   }
 
   booking.status = "return_requested";
@@ -399,16 +717,41 @@ const autoInitiateReturnIfOverdue = async (booking) => {
 };
 
 const autoInitiateReturnsForFilter = async (baseFilter = {}) => {
+  const now = new Date();
+  const nowUtcDay = toUtcDateOnly(now);
+
+  // Hourly rentals should move to return_requested as soon as endDate has passed.
   await Booking.updateMany(
     {
       ...baseFilter,
       status: "active",
-      endDate: { $lte: new Date() },
+      pricingUnit: "hourly",
+      endDate: { $lte: now },
     },
     {
       $set: {
         status: "return_requested",
-        "returnFlow.requestedAt": new Date(),
+        "returnFlow.requestedAt": now,
+        "returnFlow.requestedBy": null,
+      },
+    }
+  );
+
+  // Daily/weekly rentals should transition only after the end date's UTC day has fully passed.
+  await Booking.updateMany(
+    {
+      ...baseFilter,
+      status: "active",
+      $or: [
+        { pricingUnit: { $in: ["daily", "weekly", null] } },
+        { pricingUnit: { $exists: false } },
+      ],
+      endDate: { $lt: nowUtcDay },
+    },
+    {
+      $set: {
+        status: "return_requested",
+        "returnFlow.requestedAt": now,
         "returnFlow.requestedBy": null,
       },
     }
@@ -435,6 +778,11 @@ export const getBookingAvailabilityService = async ({
     throw new AppError("This product is not currently available for booking.", 400);
   }
 
+  const owner = await User.findById(product.owner).select("ownerProfile.activitySuspended");
+  if (owner?.ownerProfile?.activitySuspended) {
+    throw new AppError("This owner is temporarily suspended from accepting new bookings.", 403);
+  }
+
   const { start, end } = normalizeBookingWindow(startDate, endDate, pricingUnit);
   const duration = validateBookingWindow(product, start, end, pricingUnit);
   const conflicts = getConflictingBlocks(product, start, end);
@@ -449,6 +797,9 @@ export const getBookingAvailabilityService = async ({
           pricingUnit,
         })
       : null;
+  if (acceptedNegotiation) {
+    enforceNegotiationMinimumUnits(acceptedNegotiation, duration);
+  }
 
   return {
     product,
@@ -482,6 +833,11 @@ export const createBookingService = async (payload, renter) => {
     throw new AppError("This product is not available for booking.", 400);
   }
 
+  const owner = await User.findById(product.owner).select("ownerProfile.activitySuspended");
+  if (owner?.ownerProfile?.activitySuspended) {
+    throw new AppError("This owner is temporarily suspended from accepting bookings.", 403);
+  }
+
   if (product.owner.equals(renter._id)) {
     throw new AppError("You cannot book your own product.", 400);
   }
@@ -503,6 +859,9 @@ export const createBookingService = async (payload, renter) => {
     endDate: end,
     pricingUnit,
   });
+  if (acceptedNegotiation) {
+    enforceNegotiationMinimumUnits(acceptedNegotiation, duration);
+  }
 
   const pricingSnapshot = computePricing(product.pricing, duration.totalUnits, {
     baseRateOverride: acceptedNegotiation?.amount,
@@ -754,6 +1113,15 @@ export const updateBookingStatusService = async (bookingId, payload, user) => {
     }
   } else if (!isOwnerOrAdmin(booking, user)) {
     throw new AppError("Only the owner can update this booking status.", 403);
+  } else if (!user.hasRole("admin") && user.ownerProfile?.activitySuspended) {
+    throw new AppError("Owner activity is suspended. Booking status updates are disabled.", 403);
+  }
+
+  if (nextStatus === "confirmed") {
+    const atomicResult = await confirmBookingAtomically(bookingId, payload, user);
+    if (atomicResult) {
+      return atomicResult;
+    }
   }
 
   const product = await Product.findById(booking.product).select(
@@ -809,6 +1177,7 @@ export const updateBookingStatusService = async (bookingId, payload, user) => {
       };
     }
     await removeBlockedRange(booking.product, booking._id);
+    await updateOwnerTrustedSellerStatus(booking.owner, "unsuccessful");
   }
 
   if (nextStatus === "cancelled") {
@@ -840,6 +1209,7 @@ export const updateBookingStatusService = async (bookingId, payload, user) => {
       }
     }
     await removeBlockedRange(booking.product, booking._id);
+    await updateOwnerTrustedSellerStatus(booking.owner, "unsuccessful");
   }
 
   if (nextStatus === "completed") {
@@ -852,8 +1222,33 @@ export const updateBookingStatusService = async (bookingId, payload, user) => {
       confirmedAt: new Date(),
       confirmedBy: user._id,
     };
+
+    const settlement = calculateEarlyReturnSettlement(booking);
+    if (settlement) {
+      const refund = await issueRazorpayRefund(booking, settlement.refundAmount);
+      booking.paymentStatus =
+        settlement.refundAmount >= Number(booking.pricingSnapshot?.totalAmount || 0)
+          ? "refunded"
+          : "partially_refunded";
+      booking.paymentDetails = {
+        ...booking.paymentDetails,
+        refundId: refund?.id || booking.paymentDetails?.refundId || "",
+        refundStatus: refund?.status || "processed",
+        refundAmount: settlement.refundAmount,
+        refundedAt: new Date(),
+      };
+      booking.returnFlow = {
+        ...booking.returnFlow,
+        settlement: {
+          ...settlement,
+          settledAt: new Date(),
+        },
+      };
+    }
+
     await removeBlockedRange(booking.product, booking._id);
     await Product.updateOne({ _id: booking.product }, { $inc: { totalRentals: 1 } });
+    await updateOwnerTrustedSellerStatus(booking.owner, "completed");
   }
 
   if (nextStatus === "return_requested") {
@@ -929,6 +1324,7 @@ export const cancelBookingService = async (bookingId, payload, user) => {
 
   await booking.save();
   await removeBlockedRange(booking.product, booking._id);
+  await updateOwnerTrustedSellerStatus(booking.owner, "unsuccessful");
 
   return populateBookingById(booking._id);
 };

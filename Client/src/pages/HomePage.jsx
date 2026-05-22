@@ -9,8 +9,8 @@ function ProductSection({ title, subtitle, products, loading, error, emptyText }
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-extrabold text-black">{title}</div>
-          <div className="text-xs font-semibold text-black/55">{subtitle}</div>
+          <div className="text-sm font-extrabold text-slate-900">{title}</div>
+          <div className="text-xs font-semibold text-slate-600">{subtitle}</div>
         </div>
         <Button variant="ghost" className="text-sm" as={Link} to="/products">
           View all
@@ -22,7 +22,7 @@ function ProductSection({ title, subtitle, products, loading, error, emptyText }
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="h-64 animate-pulse rounded-2xl border border-black/10 bg-white"
+              className="h-64 animate-pulse rounded-2xl border border-blue-100 bg-white"
             />
           ))}
         </div>
@@ -37,7 +37,7 @@ function ProductSection({ title, subtitle, products, loading, error, emptyText }
           ))}
         </div>
       ) : (
-        <div className="rounded-2xl border border-dashed border-black/15 bg-white p-5 text-sm font-semibold text-black/50">
+        <div className="rounded-2xl border border-dashed border-blue-100 bg-white p-5 text-sm font-semibold text-slate-500">
           {emptyText}
         </div>
       )}
@@ -74,7 +74,7 @@ export default function HomePage() {
         setTrending(trendingRes.data?.data?.products || []);
       } catch (err) {
         if (cancelled) return;
-        setError(err?.response?.data?.message || err.message || "Could not load homepage products.");
+        setError(err?.response?.data?.message || err.message || "We could not load homepage listings.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -87,46 +87,45 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
-      <section className="overflow-hidden rounded-3xl border border-black/10 bg-white shadow-sm shadow-black/5">
+      <section className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm shadow-black/5">
         <div className="grid gap-6 p-6 md:grid-cols-[1.3fr_1fr] md:items-center md:p-10">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-black/5 px-3 py-1 text-xs font-bold text-black/70">
-              Trusted rentals for everyday needs
+            <div className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-slate-700">
+              Trusted rental platform
             </div>
-            <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-black md:text-4xl">
-              Rent quality equipment with confidence.
+            <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
+              Rent quality equipment with confidence
             </h1>
-            <p className="mt-3 max-w-xl text-sm font-semibold leading-relaxed text-black/60">
-              Discover reliable products, compare pricing modes, search nearby inventory, and
-              connect directly with owners through a clear rental flow.
+            <p className="mt-3 max-w-xl text-sm font-semibold leading-relaxed text-slate-600">
+              Browse listings, compare prices, and contact owners through a simple booking process.
             </p>
 
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <Button as={Link} to="/products">
-                Browse products
+                Browse Products
               </Button>
               <Button variant="secondary" as={Link} to="/list">
-                List a product
+                List an Item
               </Button>
             </div>
           </div>
 
           <div className="relative hidden md:block">
-            <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-[#FFC800]/40 blur-2xl" />
-            <div className="absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-black/10 blur-2xl" />
-            <div className="relative rounded-3xl border border-black/10 bg-[#FFF7D1] p-6">
+            <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-blue-600/40 blur-2xl" />
+            <div className="absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-blue-100 blur-2xl" />
+            <div className="relative rounded-3xl border border-blue-100 bg-blue-50 p-6">
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label: "Featured", value: `${featured.length} live picks` },
-                  { label: "Trending", value: `${trending.length} high-interest listings` },
-                  { label: "Nearby", value: "Search by map coordinates" },
-                  { label: "Flexible", value: "Hourly, daily, and weekly pricing" },
+                  { label: "Featured", value: `${featured.length} featured listings` },
+                  { label: "Trending", value: `${trending.length} popular items` },
+                  { label: "Nearby", value: "Search by location" },
+                  { label: "Flexible", value: "Hourly, daily, and weekly plans" },
                 ].map((item) => (
                   <div
                     key={item.label}
-                    className="rounded-2xl border border-black/10 bg-white p-4 text-sm font-extrabold text-black shadow-sm shadow-black/5"
+                    className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-extrabold text-slate-900 shadow-sm shadow-black/5"
                   >
-                    <div className="text-xs font-semibold text-black/50">{item.label}</div>
+                    <div className="text-xs font-semibold text-slate-500">{item.label}</div>
                     <div className="mt-2">{item.value}</div>
                   </div>
                 ))}
@@ -138,20 +137,20 @@ export default function HomePage() {
 
       <ProductSection
         title="Featured listings"
-        subtitle="Curated listings that are explicitly marked for homepage visibility."
+        subtitle="Curated listings selected for the homepage."
         products={featured}
         loading={loading}
         error={error}
-        emptyText="No featured listings yet."
+        emptyText="Featured listings will appear here."
       />
 
       <ProductSection
         title="Trending now"
-        subtitle="Listings rising to the top based on rental activity and product quality signals."
+        subtitle="Items that are currently popular with users."
         products={trending}
         loading={loading}
         error={error}
-        emptyText="No trending listings yet."
+        emptyText="Trending listings will appear here."
       />
     </div>
   );

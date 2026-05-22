@@ -10,6 +10,7 @@
   import cookieParser from "cookie-parser";
   import rateLimit from "express-rate-limit";
   import http from "http";
+  import passport from "passport";
 
   //Recreating, because ES module __dirname doesn’t exist - Useful for reading files, serving static content, etc.
   //convert the url to normal file path
@@ -29,13 +30,16 @@
   import bookingRoutes from "./routes/bookingRoutes.js";
   import chatRoutes from "./routes/chatRoutes.js";
   import uploadRoutes from "./routes/uploadRoutes.js";
+  import notificationRoutes from "./routes/notificationRoutes.js";
   import adminRoutes from "./routes/admin/adminRoutes.js";
   import registerChatSocket from "./socket/chatSocket.js";
   import Conversation from "./models/Conversation.js";
+  import { configurePassport } from "./config/passport.js";
 
   const app = express();
   //useful for scaling, sockets later
   const server = http.createServer(app);
+  const isDevelopment = process.env.NODE_ENV !== "production";
 
   app.use(
     helmet({
@@ -48,11 +52,19 @@
       },
     })
   );
-  const allowedOrigins = [
-    process.env.CLIENT_URL,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-  ].filter(Boolean);
+  const parseClientOrigins = (rawValue) =>
+    String(rawValue || "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+
+  const configuredClientOrigins = parseClientOrigins(process.env.CLIENT_URL);
+  const developmentOrigins = isDevelopment
+    ? ["http://localhost:5173", "http://127.0.0.1:5173"]
+    : [];
+  const allowedOrigins = Array.from(
+    new Set([...configuredClientOrigins, ...developmentOrigins])
+  );
 
   app.use(cors({
     origin(origin, callback) {
@@ -74,8 +86,8 @@
   app.use(express.urlencoded({ extended: true }));
   //read cookies (for auth)
   app.use(cookieParser());
-
-  const isDevelopment = process.env.NODE_ENV !== "production";
+  configurePassport();
+  app.use(passport.initialize());
 
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -125,12 +137,17 @@
 
   app.use("/api/v1/users/login", authLimiter);
   app.use("/api/v1/users/register", authLimiter);
+  app.use("/api/v1/users/forgot-password", authLimiter);
+  app.use("/api/v1/users/reset-password", authLimiter);
+  app.use("/api/v1/users/google", authLimiter);
+  app.use("/api/v1/admin/login", authLimiter);
   app.use("/api/v1/users", userRoutes);
   app.use("/api/v1/categories", categoryRoutes);
   app.use("/api/v1/products", productRoutes);
   app.use("/api/v1/bookings", bookingRoutes);
   app.use("/api/v1/chat", chatLimiter, chatRoutes);
   app.use("/api/v1/uploads", uploadRoutes);
+  app.use("/api/v1/notifications", notificationRoutes);
   app.use("/api/v1/admin", adminLimiter, adminRoutes);
 
   app.use(notFound);

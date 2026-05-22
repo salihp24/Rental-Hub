@@ -6,7 +6,9 @@ import {
   deleteProduct,
   getMyListings,
   getProduct,
+  getProductPreview,
   getProductPricing,
+  getProductSuggestions,
   getProducts,
   updateProduct,
 } from "../controllers/productController.js";
@@ -18,9 +20,11 @@ const router = express.Router();
 
 // Public browse
 router.get("/", validate(productValidation.listQuery), getProducts);
+router.get("/suggestions", validate(productValidation.suggestionQuery), getProductSuggestions);
 
 // Logged-in user views their own listings
 router.get("/mine", protect, validate(productValidation.listQuery), getMyListings);
+router.get("/preview/:productId", protect, validate(productValidation.params), getProductPreview);
 
 //get single product
 router.get("/:productIdentifier", validate(productValidation.publicParams), getProduct);

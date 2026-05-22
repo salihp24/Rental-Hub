@@ -90,6 +90,7 @@ const partialDailyPricingSchema = Joi.object({
 const partialLocationSchema = Joi.object({
   address: Joi.string().trim().max(200).allow(""),
   city: Joi.string().trim().max(80),
+  district: Joi.string().trim().max(80),
   state: Joi.string().trim().max(80),
   pincode: Joi.string().trim().max(20).allow(""),
   coordinates: Joi.object({
@@ -195,12 +196,20 @@ const productListQuerySchema = paginationQuerySchema.keys({
   )
 );
 
+const productSuggestionQuerySchema = Joi.object({
+  search: Joi.string().trim().min(1).max(100).required(),
+  district: Joi.string().trim().max(80),
+  city: Joi.string().trim().max(80),
+  limit: Joi.number().integer().min(1).max(12).default(6),
+});
+
 export const productValidation = {
   create: { body: createProductBodySchema },
   update: { body: updateProductBodySchema },
   params: { params: productIdParamsSchema },
   publicParams: { params: productIdentifierParamsSchema },
   listQuery: { query: productListQuerySchema },
+  suggestionQuery: { query: productSuggestionQuerySchema },
 };
 
 export default productValidation;

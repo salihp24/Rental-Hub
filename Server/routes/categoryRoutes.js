@@ -1,6 +1,6 @@
 import express from "express";
 
-import protect from "../middleware/auth.js";
+import protect, { protectOptional } from "../middleware/auth.js";
 import restrictTo from "../middleware/authorize.js";
 import validate from "../middleware/validate.js";
 import { categoryValidation } from "../validation/index.js";
@@ -20,7 +20,7 @@ const router = express.Router();
 //Returns hierarchical categories (parent → child)
 router.get("/tree", validate(categoryValidation.treeQuery), getCategoryTree);
 
-router.get("/", validate(categoryValidation.listQuery), listCategories);
+router.get("/", protectOptional, validate(categoryValidation.listQuery), listCategories);
 
 router.post(
   "/",

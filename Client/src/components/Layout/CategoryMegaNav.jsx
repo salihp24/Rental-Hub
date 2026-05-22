@@ -32,8 +32,24 @@ function normalizeColumnNodes(root) {
   return children.map((child) => ({
     ...child,
     items: Array.isArray(child.children) ? [...child.children].sort(byName) : [],
+    nestedItemsByParent: buildNestedItemsByParent(child),
     quickSections: collectQuickSections(child),
   }));
+}
+
+function buildNestedItemsByParent(node) {
+  const map = {};
+
+  const walk = (parent) => {
+    const parentId = String(parent?._id || "");
+    const children = Array.isArray(parent?.children) ? [...parent.children].sort(byName) : [];
+    if (!parentId || !children.length) return;
+    map[parentId] = children;
+    for (const child of children) walk(child);
+  };
+
+  walk(node);
+  return map;
 }
 
 function collectNodes(node, bucket = []) {
@@ -213,7 +229,7 @@ export default function CategoryMegaNav() {
 
   return (
     <div
-      className="relative z-30 hidden border-t border-black/10 bg-white md:block"
+      className="relative z-30 hidden border-t border-blue-100 bg-white md:block"
       onMouseLeave={() => setOpen(false)}
     >
       <div
@@ -242,8 +258,8 @@ export default function CategoryMegaNav() {
                 }}
                 className={`border-b-2 pb-2 text-base font-extrabold transition ${
                   isActive
-                    ? "border-black text-black"
-                    : "border-transparent text-black/75 hover:text-black"
+                    ? "border-blue-300 text-slate-900"
+                    : "border-transparent text-slate-700 hover:text-slate-900"
                 }`}
               >
                 {root.name}
@@ -253,7 +269,7 @@ export default function CategoryMegaNav() {
         </div>
 
         {open ? (
-          <div className="absolute inset-x-0 top-full border-t border-black/10 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.08)]">
+          <div className="absolute inset-x-0 top-full border-t border-blue-100 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.08)]">
             <div className="mx-auto max-w-6xl">
               <div className="grid gap-8 px-4 py-6 lg:grid-cols-6">
                 {columns.length ? (
@@ -261,7 +277,7 @@ export default function CategoryMegaNav() {
                     <div key={column._id} className="space-y-3">
                       <Link
                         to={categoryHref(column._id)}
-                        className="block text-sm font-extrabold text-black hover:underline"
+                        className="block text-sm font-extrabold text-slate-900 hover:underline"
                         onClick={() => setOpen(false)}
                       >
                         {column.name}
@@ -269,14 +285,25 @@ export default function CategoryMegaNav() {
                       <div className="space-y-2">
                         {column.items.length ? (
                           column.items.map((item) => (
-                            <Link
-                              key={item._id}
-                              to={categoryHref(item._id)}
-                              className="block text-sm font-semibold text-black/65 transition hover:text-black"
-                              onClick={() => setOpen(false)}
-                            >
-                              {item.name}
-                            </Link>
+                            <div key={item._id} className="space-y-1">
+                              <Link
+                                to={categoryHref(item._id)}
+                                className="block text-sm font-semibold text-slate-700 transition hover:text-slate-900"
+                                onClick={() => setOpen(false)}
+                              >
+                                {item.name}
+                              </Link>
+                              {(column.nestedItemsByParent?.[String(item._id)] || []).map((nested) => (
+                                <Link
+                                  key={`${item._id}-${nested._id}`}
+                                  to={categoryHref(nested._id)}
+                                  className="block pl-4 text-sm font-medium text-slate-500 transition hover:text-slate-900"
+                                  onClick={() => setOpen(false)}
+                                >
+                                  {nested.name}
+                                </Link>
+                              ))}
+                            </div>
                           ))
                         ) : (
                           (() => {
@@ -285,7 +312,7 @@ export default function CategoryMegaNav() {
                               return (
                                 <Link
                                   to={categoryHref(column._id)}
-                                  className="block text-sm font-semibold text-black/65 transition hover:text-black"
+                                  className="block text-sm font-semibold text-slate-700 transition hover:text-slate-900"
                                   onClick={() => setOpen(false)}
                                 >
                                   View all
@@ -297,7 +324,7 @@ export default function CategoryMegaNav() {
                               <Link
                                 key={item._id}
                                 to={categoryHref(item._id)}
-                                className="block text-sm font-semibold text-black/65 transition hover:text-black"
+                                className="block text-sm font-semibold text-slate-700 transition hover:text-slate-900"
                                 onClick={() => setOpen(false)}
                               >
                                 {item.name}
@@ -310,9 +337,9 @@ export default function CategoryMegaNav() {
                         section?.options?.length ? (
                           <div
                             key={`${column._id}-${section.key}`}
-                            className="space-y-2 border-t border-black/8 pt-3"
+                            className="space-y-2 border-t border-blue-100 pt-3"
                           >
-                            <div className="text-[11px] font-extrabold uppercase tracking-wide text-black/45">
+                            <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
                               {section.label}
                             </div>
                             <div className="space-y-2">
@@ -320,7 +347,7 @@ export default function CategoryMegaNav() {
                                 <Link
                                   key={`${column._id}-${section.key}-${option}`}
                                   to={categoryHref(column._id, { [section.key]: option })}
-                                  className="block text-sm font-semibold text-black/65 transition hover:text-black"
+                                  className="block text-sm font-semibold text-slate-700 transition hover:text-slate-900"
                                   onClick={() => setOpen(false)}
                                 >
                                   {option}
@@ -336,7 +363,7 @@ export default function CategoryMegaNav() {
                   <div className="lg:col-span-6">
                     <Link
                       to={categoryHref(activeRoot._id)}
-                      className="text-sm font-semibold text-black/65 transition hover:text-black"
+                      className="text-sm font-semibold text-slate-700 transition hover:text-slate-900"
                       onClick={() => setOpen(false)}
                     >
                       View all in {activeRoot.name}

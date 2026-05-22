@@ -1,8 +1,9 @@
 import { Joi } from "../joi.js";
 import { objectId, paginationQuerySchema } from "../joi.js";
 
-//no query params allowed - for specific routes
-const emptyQuerySchema = Joi.object({}).unknown(false);
+const statsQuerySchema = Joi.object({
+  days: Joi.number().integer().min(7).max(90).valid(7, 30, 90).default(30),
+});
 
 
 const listUsersQuerySchema = paginationQuerySchema.keys({
@@ -27,6 +28,15 @@ const updateUserRoleBodySchema = Joi.object({
     .min(1)
     .unique()
     .required(),
+}).required();
+
+const updateOwnerActivityBodySchema = Joi.object({
+  suspended: Joi.boolean().required(),
+  reason: Joi.when("suspended", {
+    is: true,
+    then: Joi.string().trim().min(10).max(500).required(),
+    otherwise: Joi.string().trim().max(500).allow(""),
+  }),
 }).required();
 
 const productParamsSchema = Joi.object({
@@ -95,18 +105,9 @@ const listBookingsQuerySchema = paginationQuerySchema.keys({
 
 const updateBookingStatusBodySchema = Joi.object({
   status: Joi.string()
-    .valid(
-      "pending",
-      "confirmed",
-      "active",
-      "return_requested",
-      "completed",
-      "cancelled",
-      "rejected"
-    )
+    .valid("cancelled", "rejected")
     .required(),
-  paymentStatus: Joi.string().valid("unpaid", "paid", "refunded", "partially_refunded"),
-  reason: Joi.string().trim().min(5).max(500),
+  reason: Joi.string().trim().min(10).max(500).required(),
 }).required();
 
 const listAuditLogsQuerySchema = paginationQuerySchema.keys({
@@ -116,12 +117,17 @@ const listAuditLogsQuerySchema = paginationQuerySchema.keys({
   sort: Joi.string().valid("createdAt", "-createdAt", "action", "-action"),
 });
 
+const financeQuerySchema = Joi.object({
+  days: Joi.number().integer().min(1).max(90).default(7),
+});
+
 export const adminValidation = {
-  statsQuery: { query: emptyQuerySchema },
+  statsQuery: { query: statsQuerySchema },
   listUsersQuery: { query: listUsersQuerySchema },
   userParams: { params: userParamsSchema },
   updateUserStatus: { body: updateUserStatusBodySchema },
   updateUserRole: { body: updateUserRoleBodySchema },
+  updateOwnerActivity: { body: updateOwnerActivityBodySchema },
   productParams: { params: productParamsSchema },
   listProductsQuery: { query: listProductsQuerySchema },
   updateProductStatus: { body: updateProductStatusBodySchema },
@@ -130,6 +136,7 @@ export const adminValidation = {
   listBookingsQuery: { query: listBookingsQuerySchema },
   updateBookingStatus: { body: updateBookingStatusBodySchema },
   listAuditLogsQuery: { query: listAuditLogsQuerySchema },
+  financeQuery: { query: financeQuerySchema },
 };
 
 export default adminValidation;

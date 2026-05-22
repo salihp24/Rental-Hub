@@ -19,20 +19,6 @@ const addDaysIso = (days) => {
   return date.toISOString().slice(0, 10);
 };
 
-const toLocalDateTimeValue = (date) => {
-  const next = new Date(date);
-  next.setMinutes(next.getMinutes() - next.getTimezoneOffset());
-  return next.toISOString().slice(0, 16);
-};
-
-const addHoursLocalValue = (hours) => {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() + 5);
-  date.setMinutes(0, 0, 0);
-  date.setHours(date.getHours() + hours);
-  return toLocalDateTimeValue(date);
-};
-
 const money = (value, currency = "INR") => {
   const num = Number(value || 0);
   try {
@@ -48,23 +34,24 @@ const money = (value, currency = "INR") => {
 
 function InfoRow({ label, value }) {
   return (
-    <div className="rounded-2xl border border-black/10 bg-white p-4">
-      <div className="text-[11px] font-extrabold uppercase text-black/45">{label}</div>
-      <div className="mt-1 text-sm font-extrabold text-black">{value}</div>
+    <div className="rounded-2xl border border-blue-100 bg-white p-4">
+      <div className="text-[11px] font-extrabold uppercase text-slate-500">{label}</div>
+      <div className="mt-1 text-sm font-extrabold text-slate-900">{value}</div>
     </div>
   );
 }
 
 const UNIT_COPY = {
-  hourly: { label: "Hourly", unit: "hour", helper: "Use exact start and end times." },
   daily: { label: "Daily", unit: "day", helper: "Best for standard short-term rentals." },
   weekly: { label: "Weekly", unit: "week", helper: "Billed in started 7-day blocks." },
 };
 
 export default function ProductDetailPage() {
-  const { productSlug } = useParams();
+  const { productSlug, productId } = useParams();
   const navigate = useNavigate();
   const { user } = useSelector((s) => s.auth);
+  const isPreviewRoute = Boolean(productId);
+  const identifier = productId || productSlug;
 
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -72,8 +59,6 @@ export default function ProductDetailPage() {
   const [pricingUnit, setPricingUnit] = useState("daily");
   const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState(addDaysIso(1));
-  const [startDateTime, setStartDateTime] = useState(addHoursLocalValue(1));
-  const [endDateTime, setEndDateTime] = useState(addHoursLocalValue(3));
   const [deliveryType, setDeliveryType] = useState("pickup");
   const [deliveryAddress, setDeliveryAddress] = useState({
     street: "",
@@ -93,19 +78,23 @@ export default function ProductDetailPage() {
       setLoading(true);
       setError("");
 
+      const endpoint = isPreviewRoute
+        ? `/products/preview/${productId}`
+        : `/products/${productSlug}`;
+
       api
-        .get(`/products/${productSlug}`)
+        .get(endpoint)
         .then((res) => {
           if (!alive) return;
           const nextProduct = res.data?.data?.product || null;
           setProduct(nextProduct);
-          if (nextProduct?.slug && nextProduct.slug !== productSlug) {
+          if (!isPreviewRoute && nextProduct?.slug && nextProduct.slug !== productSlug) {
             navigate(`/products/${nextProduct.slug}`, { replace: true });
           }
         })
         .catch((err) => {
           if (alive) {
-            setError(err?.response?.data?.message || err.message || "Could not load product.");
+            setError(err?.response?.data?.message || err.message || "We could not load this listing.");
           }
         })
         .finally(() => {
@@ -117,14 +106,14 @@ export default function ProductDetailPage() {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [navigate, productSlug]);
+  }, [isPreviewRoute, navigate, productId, productSlug]);
 
   const bookingProductId = product?._id || "";
-  const publicProductPath = product?.slug || productSlug || bookingProductId;
+  const publicProductPath = product?.slug || identifier || bookingProductId;
+  const backPath = isPreviewRoute ? "/account" : "/";
 
   const availableUnits = useMemo(() => {
     const units = [];
-    if (product?.pricing?.hourly?.enabled) units.push("hourly");
     if (product?.pricing?.daily?.enabled !== false) units.push("daily");
     if (product?.pricing?.weekly?.enabled) units.push("weekly");
     return units.length ? units : ["daily"];
@@ -134,26 +123,41 @@ export default function ProductDetailPage() {
   const imageUrl = getPrimaryImageUrl(product?.images);
   const currency = product?.pricing?.currency || "INR";
   const isOwner = product?.owner?._id && user?._id && product.owner._id === user._id;
+  const ownerLabel = product?.owner?.name || product?.owner?.email || "Owner";
+  const ownerAvatar = product?.owner?.avatar?.url || "";
+  const trustedSellerState = product?.owner?.ownerProfile?.trustedSeller || {};
+  const isTrustedSeller =
+    trustedSellerState?.manualOverride === true ||
+    (trustedSellerState?.manualOverride !== false && trustedSellerState?.autoQualified === true);
   const activePricingUnit = availableUnits.includes(pricingUnit) ? pricingUnit : availableUnits[0];
+  const isReadOnlyPreview = isPreviewRoute && isOwner;
 
   const pricing = availability?.pricing;
+  const negotiatedRate = availability?.negotiation?.amount;
+  const effectiveDailyRate =
+    negotiatedRate != null ? negotiatedRate : product?.pricing?.daily?.rate;
   const unitCopy = UNIT_COPY[activePricingUnit];
   const ruleText = useMemo(() => {
     const rules = product?.rentalRules;
-    if (!rules) return "Rules unavailable";
+    if (!rules) return "Rental rules unavailable";
     return `${rules.minRentalDays || 1}-${rules.maxRentalDays || 30} days, ${rules.advanceBookingDays || 0} days ahead`;
   }, [product]);
 
-  const activeStart = activePricingUnit === "hourly" ? startDateTime : startDate;
-  const activeEnd = activePricingUnit === "hourly" ? endDateTime : endDate;
+  const activeStart = startDate;
+  const activeEnd = endDate;
+  const ownerMemberSince = product?.owner?.createdAt
+    ? new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" }).format(
+        new Date(product.owner.createdAt)
+      )
+    : null;
 
   const updateDeliveryAddress = (field, value) => {
     setDeliveryAddress((current) => ({ ...current, [field]: value }));
   };
 
   const buildBookingWindow = () => ({
-    startDate: activePricingUnit === "hourly" ? new Date(startDateTime).toISOString() : startDate,
-    endDate: activePricingUnit === "hourly" ? new Date(endDateTime).toISOString() : endDate,
+    startDate,
+    endDate,
   });
 
   const checkAvailability = async (e) => {
@@ -170,11 +174,36 @@ export default function ProductDetailPage() {
       });
       setAvailability(res.data?.data || null);
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || "Could not check availability.");
+      setError(err?.response?.data?.message || err.message || "We could not check availability.");
     } finally {
       setChecking(false);
     }
   };
+
+  useEffect(() => {
+    if (!bookingProductId) return;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const windowPayload = {
+          startDate,
+          endDate,
+        };
+        const res = await api.get("/bookings/availability", {
+          params: {
+            product: bookingProductId,
+            pricingUnit: activePricingUnit,
+            ...windowPayload,
+          },
+        });
+        setAvailability(res.data?.data || null);
+      } catch {
+        // Silent preload: keep base price if availability check fails.
+      }
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [bookingProductId, activePricingUnit, startDate, endDate]);
 
   const createBooking = async () => {
     if (!user) {
@@ -194,7 +223,7 @@ export default function ProductDetailPage() {
         !deliveryAddress.pincode.trim())
     ) {
       setBooking(false);
-      setError("Delivery address is required for delivery bookings.");
+      setError("A delivery address is required for delivery requests.");
       return;
     }
 
@@ -214,11 +243,11 @@ export default function ProductDetailPage() {
       const res = await api.post("/bookings", payload);
       const createdBooking = res.data?.data?.booking;
       setNotice(
-        `Booking request submitted${createdBooking?.orderCode ? ` (${createdBooking.orderCode})` : ""}. Wait for the owner to approve it, then you can pay from your account page.`
+        `Your booking request has been submitted${createdBooking?.orderCode ? ` (${createdBooking.orderCode})` : ""}. After the owner approves it, you can complete payment from your account page.`
       );
       setAvailability(null);
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || "Could not create booking.");
+      setError(err?.response?.data?.message || err.message || "We could not submit your booking request.");
     } finally {
       setBooking(false);
     }
@@ -231,11 +260,18 @@ export default function ProductDetailPage() {
     }
 
     if (!product?.owner?._id || isOwner) return;
-
-    navigate(`/chat?product=${product._id}&participant=${product.owner._id}`);
+    const windowPayload = buildBookingWindow();
+    const params = new URLSearchParams({
+      product: product._id,
+      participant: product.owner._id,
+      pricingUnit: activePricingUnit,
+      startDate: windowPayload.startDate,
+      endDate: windowPayload.endDate,
+    });
+    navigate(`/chat?${params.toString()}`);
   };
 
-  if (!productSlug) return <Navigate to="/" replace />;
+  if (!identifier) return <Navigate to="/" replace />;
 
   if (loading) {
     return (
@@ -256,8 +292,8 @@ export default function ProductDetailPage() {
 
   return (
     <div className="space-y-6">
-      <Button variant="ghost" as={Link} to="/">
-        Back to listings
+      <Button variant="ghost" as={Link} to={backPath}>
+        Back to Listings
       </Button>
 
       {error ? (
@@ -272,12 +308,12 @@ export default function ProductDetailPage() {
       ) : null}
 
       <section className="grid gap-6 md:grid-cols-[1.1fr_0.9fr]">
-        <div className="overflow-hidden rounded-3xl border border-black/10 bg-white shadow-sm shadow-black/5">
-          <div className="aspect-[4/3] bg-black/[0.03]">
+        <div className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm shadow-black/5">
+          <div className="aspect-[4/3] bg-blue-50/60">
             {imageUrl ? (
               <img src={imageUrl} alt={product.title} className="h-full w-full object-cover" />
             ) : (
-              <div className="flex h-full items-center justify-center text-sm font-semibold text-black/40">
+              <div className="flex h-full items-center justify-center text-sm font-semibold text-slate-900/40">
                 No image
               </div>
             )}
@@ -299,39 +335,78 @@ export default function ProductDetailPage() {
 
         <div className="space-y-5">
           <div>
-            <div className="text-xs font-extrabold uppercase text-black/45">
+            <div className="text-xs font-extrabold uppercase text-slate-500">
               {product.category?.name || "Product"}
             </div>
-            <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-black">
+            <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-slate-900">
               {product.title}
             </h1>
-            <p className="mt-2 text-sm font-semibold leading-relaxed text-black/60">
+            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">
               {product.description}
             </p>
           </div>
 
+          <div className="rounded-3xl border border-blue-200 bg-white p-4 shadow-sm shadow-black/5">
+            <div className="flex items-start gap-3">
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full border border-blue-200 bg-blue-50">
+                {ownerAvatar ? (
+                  <img src={ownerAvatar} alt={ownerLabel} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-lg font-extrabold text-blue-700">
+                    {ownerLabel.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Posted by</div>
+                <div className="truncate text-xl font-extrabold text-slate-900">{ownerLabel}</div>
+                <div className="mt-1 text-sm font-semibold text-slate-600">
+                  {ownerMemberSince ? `Member since ${ownerMemberSince}` : "Verified marketplace member"}
+                </div>
+                {isTrustedSeller ? (
+                  <div className="mt-2 inline-flex rounded-full bg-blue-600 px-3 py-1 text-xs font-extrabold text-white">
+                    Trusted Seller
+                  </div>
+                ) : (
+                  <div className="mt-2 inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
+                    Seller
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {!isOwner && !isReadOnlyPreview ? (
+              <div className="mt-4 space-y-3">
+                <Button type="button" variant="secondary" className="w-full" onClick={openChat}>
+                  Chat with seller
+                </Button>
+              </div>
+            ) : null}
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
-            <InfoRow label="Daily rate" value={`${money(product.pricing?.daily?.rate, currency)} / day`} />
+            <InfoRow
+              label={negotiatedRate != null ? "Your special rate" : "Daily rate"}
+              value={`${money(effectiveDailyRate, currency)} / day`}
+            />
             <InfoRow label="Deposit" value={money(product.pricing?.deposit, currency)} />
             <InfoRow label="Location" value={`${product.location?.city || "Nearby"}, ${product.location?.state || ""}`} />
             <InfoRow label="Rental rules" value={ruleText} />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
-            {product.pricing?.hourly?.enabled ? (
-              <InfoRow label="Hourly" value={`${money(product.pricing.hourly.rate, currency)} / hour`} />
-            ) : null}
-            <InfoRow label="Daily" value={`${money(product.pricing?.daily?.rate, currency)} / day`} />
+            <InfoRow label="Daily" value={`${money(effectiveDailyRate, currency)} / day`} />
             {product.pricing?.weekly?.enabled ? (
               <InfoRow label="Weekly" value={`${money(product.pricing.weekly.rate, currency)} / week`} />
             ) : null}
           </div>
 
-          <div className="rounded-3xl border border-black/10 bg-white p-5 shadow-sm shadow-black/5">
+          {!isReadOnlyPreview ? (
+            <div className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm shadow-black/5">
             <div className="mb-4">
-              <h2 className="text-lg font-extrabold text-black">Request a booking</h2>
-              <p className="mt-1 text-sm font-semibold text-black/55">
-                Choose a pricing mode, check availability, review pricing, and send your booking request.
+              <h2 className="text-lg font-extrabold text-slate-900">Request Booking</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-600">
+                Choose a pricing option, check availability, review charges, and submit your request.
               </p>
             </div>
 
@@ -346,12 +421,12 @@ export default function ProductDetailPage() {
                   }}
                   className={`rounded-2xl border px-4 py-3 text-left transition ${
                     activePricingUnit === unit
-                      ? "border-black bg-[#FFF7D1]"
-                      : "border-black/10 hover:border-black/20"
+                      ? "border-blue-300 bg-blue-50"
+                      : "border-blue-100 hover:border-blue-200"
                   }`}
                 >
-                  <div className="text-sm font-extrabold text-black">{UNIT_COPY[unit].label}</div>
-                  <div className="mt-1 text-xs font-semibold text-black/55">
+                  <div className="text-sm font-extrabold text-slate-900">{UNIT_COPY[unit].label}</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-600">
                     {UNIT_COPY[unit].helper}
                   </div>
                 </button>
@@ -359,67 +434,37 @@ export default function ProductDetailPage() {
             </div>
 
             <form className="grid gap-4 sm:grid-cols-2" onSubmit={checkAvailability}>
-              {activePricingUnit === "hourly" ? (
-                <>
-                  <label className="space-y-2">
-                    <span className="text-xs font-extrabold text-black/70">Start time</span>
-                    <Input
-                      type="datetime-local"
-                      value={startDateTime}
-                      onChange={(e) => {
-                        setStartDateTime(e.target.value);
-                        setAvailability(null);
-                      }}
-                      required
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-xs font-extrabold text-black/70">End time</span>
-                    <Input
-                      type="datetime-local"
-                      value={endDateTime}
-                      min={startDateTime}
-                      onChange={(e) => {
-                        setEndDateTime(e.target.value);
-                        setAvailability(null);
-                      }}
-                      required
-                    />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label className="space-y-2">
-                    <span className="text-xs font-extrabold text-black/70">Start date</span>
-                    <Input
-                      type="date"
-                      min={todayIso()}
-                      value={startDate}
-                      onChange={(e) => {
-                        setStartDate(e.target.value);
-                        setAvailability(null);
-                      }}
-                      required
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-xs font-extrabold text-black/70">End date</span>
-                    <Input
-                      type="date"
-                      min={startDate}
-                      value={endDate}
-                      onChange={(e) => {
-                        setEndDate(e.target.value);
-                        setAvailability(null);
-                      }}
-                      required
-                    />
-                  </label>
-                </>
-              )}
+              <>
+                <label className="space-y-2">
+                  <span className="text-xs font-extrabold text-slate-700">Start date</span>
+                  <Input
+                    type="date"
+                    min={todayIso()}
+                    value={startDate}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      setAvailability(null);
+                    }}
+                    required
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-extrabold text-slate-700">End date</span>
+                  <Input
+                    type="date"
+                    min={startDate}
+                    value={endDate}
+                    onChange={(e) => {
+                      setEndDate(e.target.value);
+                      setAvailability(null);
+                    }}
+                    required
+                  />
+                </label>
+              </>
               <div className="sm:col-span-2">
                 <Button type="submit" className="w-full" disabled={checking}>
-                  {checking ? "Checking..." : `Check ${unitCopy.label.toLowerCase()} availability`}
+                  {checking ? "Checking availability..." : `Check ${unitCopy.label.toLowerCase()} availability`}
                 </Button>
               </div>
             </form>
@@ -433,36 +478,50 @@ export default function ProductDetailPage() {
                 }`}>
                   {availability.available
                     ? `${availability.totalUnits} ${availability.pricing?.unitLabel || unitCopy.unit}${Number(availability.totalUnits) === 1 ? "" : "s"} available`
-                    : "Those dates are not available"}
+                    : "The selected dates are unavailable"}
                 </div>
 
                 {pricing ? (
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <InfoRow
-                      label={`${pricing.unitLabel || unitCopy.unit} rate`}
-                      value={`${money(pricing.baseRate, currency)} / ${pricing.unitLabel || unitCopy.unit}`}
-                    />
-                    <InfoRow
-                      label="Duration"
-                      value={
-                        activePricingUnit === "hourly"
-                          ? `${availability.totalHours} hours`
-                          : activePricingUnit === "weekly"
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <InfoRow
+                        label={`${pricing.unitLabel || unitCopy.unit} rate`}
+                        value={`${money(pricing.baseRate, currency)} / ${pricing.unitLabel || unitCopy.unit}`}
+                      />
+                      <InfoRow
+                        label="Duration"
+                        value={
+                          activePricingUnit === "weekly"
                             ? `${availability.totalUnits} weeks for ${availability.totalDays} days`
                             : `${availability.totalDays} days`
-                      }
-                    />
-                    <InfoRow label="Rental" value={money(pricing.rentalAmount, currency)} />
-                    <InfoRow label="Total" value={money(pricing.totalAmount, currency)} />
+                        }
+                      />
+                      <InfoRow label="Rental" value={money(pricing.rentalAmount, currency)} />
+                      <InfoRow label="Total" value={money(pricing.totalAmount, currency)} />
+                    </div>
+                    {pricing.appliedSlab && Number(pricing.discountAmount) > 0 ? (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+                        Offer applied: {Number(pricing.appliedSlab.discountPercent)}% off for{" "}
+                        {pricing.appliedSlab.minDays}-{pricing.appliedSlab.maxDays} day rentals.
+                        You save {money(pricing.discountAmount, currency)} on this booking.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {availability?.negotiation?.amount != null ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+                    Special price applied:{" "}
+                    {money(availability.negotiation.amount, availability.negotiation.currency || currency)} per day.
                   </div>
                 ) : null}
 
                 <label className="block space-y-2">
-                  <span className="text-xs font-extrabold text-black/70">Delivery</span>
+                  <span className="text-xs font-extrabold text-slate-700">Delivery</span>
                   <select
                     value={deliveryType}
                     onChange={(e) => setDeliveryType(e.target.value)}
-                    className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm font-semibold outline-none focus:border-black/25 focus:ring-2 focus:ring-black/10"
+                    className="w-full rounded-xl border border-blue-100 bg-white px-4 py-2.5 text-sm font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                   >
                     <option value="pickup">Pickup</option>
                     <option value="delivery">Delivery</option>
@@ -482,12 +541,12 @@ export default function ProductDetailPage() {
                   value={renterNote}
                   onChange={(e) => setRenterNote(e.target.value)}
                   maxLength={500}
-                  placeholder="Add pickup timing, accessory needs, or questions for the owner."
+                  placeholder="Add pickup details, accessory requirements, or questions for the owner."
                 />
 
                 {isOwner ? (
-                  <div className="rounded-2xl border border-black/10 bg-black/[0.03] px-4 py-3 text-sm font-semibold text-black/60">
-                    You own this listing.
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm font-semibold text-slate-600">
+                    You are the owner of this listing.
                   </div>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -497,7 +556,7 @@ export default function ProductDetailPage() {
                       disabled={!availability.available || booking || isOwner}
                       onClick={createBooking}
                     >
-                      {!user ? "Login to book" : booking ? "Sending..." : "Book now"}
+                      {!user ? "Sign In to Book" : booking ? "Submitting..." : "Submit Request"}
                     </Button>
                     <Button
                       type="button"
@@ -505,17 +564,22 @@ export default function ProductDetailPage() {
                       className="w-full"
                       onClick={openChat}
                     >
-                      {!user ? "Login to message" : "Message owner"}
+                      {!user ? "Sign In to Contact Owner" : "Message Owner"}
                     </Button>
                   </div>
                 )}
               </div>
             ) : null}
 
-            <div className="mt-4 text-xs font-semibold text-black/45">
-              Selected window: {activeStart} to {activeEnd}
+            <div className="mt-4 text-xs font-semibold text-slate-500">
+              Selected time window: {activeStart} to {activeEnd}
             </div>
-          </div>
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm font-semibold text-slate-700">
+              Owner preview mode: booking actions are hidden until this listing is approved.
+            </div>
+          )}
         </div>
       </section>
     </div>

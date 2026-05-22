@@ -3,9 +3,11 @@ import {
   createProductService,
   getProductsService,
   getProductByIdentifierService,
+  getProductPreviewService,
   updateProductService,
   deleteProductService,
   getProductPricingService,
+  getProductSuggestionsService,
   getMyListingsService,
 } from "../Services/product.services.js";
 
@@ -36,9 +38,28 @@ export const getProducts = asyncHandler(async (req, res) => {
   });
 });
 
+export const getProductSuggestions = asyncHandler(async (req, res) => {
+  const result = await getProductSuggestionsService(req.query);
+
+  res.status(200).json({
+    status: "success",
+    results: result.suggestions.length,
+    data: { suggestions: result.suggestions },
+  });
+});
+
 // GET ONE
 export const getProduct = asyncHandler(async (req, res) => {
   const product = await getProductByIdentifierService(req.params.productIdentifier);
+
+  res.status(200).json({
+    status: "success",
+    data: { product },
+  });
+});
+
+export const getProductPreview = asyncHandler(async (req, res) => {
+  const product = await getProductPreviewService(req.params.productId, req.user);
 
   res.status(200).json({
     status: "success",

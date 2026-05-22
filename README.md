@@ -78,6 +78,14 @@ CLOUDINARY_API_SECRET=your_api_secret
 
 Product image uploads use Cloudinary via `POST /api/v1/uploads/products` and return hosted image URLs plus Cloudinary public IDs.
 
+## MongoDB Deployment Requirement
+
+Booking confirmation uses MongoDB transactions (`session.withTransaction(...)`).
+
+- Production must use MongoDB Atlas or a MongoDB replica set/sharded cluster.
+- Standalone MongoDB deployments (common local default) may fail for booking/payment transaction flows.
+- `MONGO_URI` in production should point to your Atlas/replica-set database.
+
 ## Run
 
 Start the API from the repo root:

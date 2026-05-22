@@ -14,6 +14,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -34,10 +35,10 @@ export default function RegisterPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-6 md:grid-cols-2 md:items-stretch">
-      <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm shadow-black/5 md:p-10">
-        <div className="text-2xl font-extrabold text-black">Create account</div>
-        <div className="mt-1 text-sm font-semibold text-black/55">
-          Create your account to rent and list products.
+      <div className="rounded-3xl border border-blue-100 bg-white p-6 shadow-sm shadow-black/5 md:p-10">
+        <div className="text-2xl font-extrabold text-slate-900">Create Account</div>
+        <div className="mt-1 text-sm font-semibold text-slate-600">
+          Create your account to rent items and publish listings.
         </div>
 
         {error ? (
@@ -48,7 +49,7 @@ export default function RegisterPage() {
 
         <form className="mt-6 space-y-4" onSubmit={onSubmit}>
           <div className="space-y-2">
-            <div className="text-xs font-extrabold text-black/70">Name</div>
+            <div className="text-xs font-extrabold text-slate-700">Name</div>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -59,7 +60,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-extrabold text-black/70">Email</div>
+            <div className="text-xs font-extrabold text-slate-700">Email</div>
             <Input
               type="email"
               value={email}
@@ -71,7 +72,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-extrabold text-black/70">Phone (optional)</div>
+            <div className="text-xs font-extrabold text-slate-700">Phone (optional)</div>
             <Input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -81,45 +82,53 @@ export default function RegisterPage() {
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs font-extrabold text-black/70">Password</div>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 6 characters"
-              autoComplete="new-password"
-              required
-            />
+            <div className="text-xs font-extrabold text-slate-700">Password</div>
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 6 characters"
+                autoComplete="new-password"
+                className="pr-20"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-extrabold text-blue-700"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
           </div>
 
           <Button className="w-full" disabled={status === "loading"}>
-            {status === "loading" ? "Creating..." : "Register"}
+            {status === "loading" ? "Creating account..." : "Create Account"}
           </Button>
         </form>
 
-        <div className="mt-6 text-sm font-semibold text-black/60">
+        <div className="mt-6 text-sm font-semibold text-slate-600">
           Already have an account?{" "}
-          <Link to="/login" className="font-extrabold text-black underline">
+          <Link to="/login" className="font-extrabold text-slate-900 underline">
             Sign in
           </Link>
         </div>
       </div>
 
-      <div className="hidden overflow-hidden rounded-3xl border border-black/10 bg-white shadow-sm shadow-black/5 md:block">
-        <div className="h-full bg-gradient-to-br from-black via-black/90 to-black/80 p-10 text-white">
+      <div className="hidden overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm shadow-black/5 md:block">
+        <div className="h-full bg-gradient-to-br from-blue-900 via-blue-800 to-blue-700 p-10 text-white">
           <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white/80">
-            Why Rental Hub?
+            Why choose Rental Hub?
           </div>
           <div className="mt-6 text-3xl font-extrabold tracking-tight">
-            Turn unused equipment into income.
+            Earn from items you are not using
           </div>
           <div className="mt-3 text-sm font-semibold leading-relaxed text-white/70">
-            Publish products quickly and connect with renters through a simple, professional
-            marketplace.
+            Post your items quickly and connect with trusted renters.
           </div>
         </div>
       </div>
     </div>
   );
 }
-

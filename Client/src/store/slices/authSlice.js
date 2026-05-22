@@ -18,7 +18,6 @@ const persist = (state) => {
       storageKey,
       JSON.stringify({
         user: state.user,
-        token: state.token,
       })
     );
   } catch {
@@ -36,7 +35,6 @@ export const register = createAsyncThunk(
       const body = res.data;
       return {
         user: body?.data?.user ?? null,
-        token: body?.token ?? null,
       };
     } catch (err) {
       return rejectWithValue(
@@ -54,11 +52,27 @@ export const login = createAsyncThunk(
       const body = res.data;
       return {
         user: body?.data?.user ?? null,
-        token: body?.token ?? null,
       };
     } catch (err) {
       return rejectWithValue(
         err?.response?.data?.message || err.message || "Login failed"
+      );
+    }
+  }
+);
+
+export const loginAdmin = createAsyncThunk(
+  "auth/loginAdmin",
+  async (payload, { rejectWithValue }) => {
+    try {
+      const res = await api.post("/admin/login", payload);
+      const body = res.data;
+      return {
+        user: body?.data?.user ?? null,
+      };
+    } catch (err) {
+      return rejectWithValue(
+        err?.response?.data?.message || err.message || "Admin login failed"
       );
     }
   }
@@ -137,7 +151,6 @@ export const updatePassword = createAsyncThunk(
       const body = res.data;
       return {
         user: body?.data?.user ?? null,
-        token: body?.token ?? null,
       };
     } catch (err) {
       return rejectWithValue(
@@ -151,9 +164,9 @@ const authSlice = createSlice({
   name: "auth",
   initialState: {
     user: persisted?.user || null,
-    token: persisted?.token || null,
     status: "idle",
     error: null,
+    isBootstrapping: !persisted?.user,
   },
   reducers: {
     clearAuthError(state) {
@@ -176,7 +189,6 @@ const authSlice = createSlice({
       .addCase(register.fulfilled, (state, action) => {
         state.status = "succeeded";
         state.user = action.payload?.user || null;
-        state.token = action.payload?.token || null;
         persist(state);
       })
       .addCase(login.pending, setPending)
@@ -184,7 +196,13 @@ const authSlice = createSlice({
       .addCase(login.fulfilled, (state, action) => {
         state.status = "succeeded";
         state.user = action.payload?.user || null;
-        state.token = action.payload?.token || null;
+        persist(state);
+      })
+      .addCase(loginAdmin.pending, setPending)
+      .addCase(loginAdmin.rejected, setRejected)
+      .addCase(loginAdmin.fulfilled, (state, action) => {
+        state.status = "succeeded";
+        state.user = action.payload?.user || null;
         persist(state);
       })
       .addCase(logout.pending, setPending)
@@ -192,7 +210,6 @@ const authSlice = createSlice({
       .addCase(logout.fulfilled, (state) => {
         state.status = "succeeded";
         state.user = null;
-        state.token = null;
         state.error = null;
         try {
           localStorage.removeItem(storageKey);
@@ -200,12 +217,16 @@ const authSlice = createSlice({
           // ignore
         }
       })
-      .addCase(fetchCurrentUser.pending, setPending)
+      .addCase(fetchCurrentUser.pending, (state) => {
+        state.status = "loading";
+        state.error = null;
+        state.isBootstrapping = true;
+      })
       .addCase(fetchCurrentUser.rejected, (state, action) => {
         state.status = "failed";
         state.user = null;
-        state.token = null;
         state.error = action.payload || "Failed to load user";
+        state.isBootstrapping = false;
         try {
           localStorage.removeItem(storageKey);
         } catch {
@@ -215,6 +236,7 @@ const authSlice = createSlice({
       .addCase(fetchCurrentUser.fulfilled, (state, action) => {
         state.status = "succeeded";
         state.user = action.payload?.user || null;
+        state.isBootstrapping = false;
         persist(state);
       })
       .addCase(updateProfile.pending, setPending)
@@ -236,7 +258,6 @@ const authSlice = createSlice({
       .addCase(updatePassword.fulfilled, (state, action) => {
         state.status = "succeeded";
         state.user = action.payload?.user || null;
-        state.token = action.payload?.token || state.token;
         persist(state);
       });
   },
@@ -244,4 +265,3 @@ const authSlice = createSlice({
 
 export const { clearAuthError } = authSlice.actions;
 export default authSlice.reducer;
-

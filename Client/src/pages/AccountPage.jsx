@@ -83,6 +83,7 @@ function StatusPill({ children, tone = "neutral" }) {
   const tones = {
     neutral: "bg-black/[0.06] text-black/65",
     payment: "bg-[#FFF7D1] text-black/70",
+    success: "bg-emerald-100 text-emerald-800",
   };
 
   return (
@@ -114,13 +115,17 @@ function BookingCard({ booking, mode, onAction, busyId }) {
     booking.status === "confirmed" &&
     booking.paymentStatus === "paid";
   const canOwnerConfirmReturn = mode === "owner" && booking.status === "return_requested";
-  const canOwnerCancel = mode === "owner" && ["pending", "confirmed"].includes(booking.status);
+  const canOwnerCancel =
+    mode === "owner" &&
+    ["pending", "confirmed"].includes(booking.status) &&
+    booking.paymentStatus !== "paid";
   const canCancel = mode === "renter" && ["pending", "confirmed"].includes(booking.status);
   const canRenterRequestReturn = mode === "renter" && booking.status === "active";
   const canConfirmPayment =
     mode === "renter" &&
     booking.status === "confirmed" &&
     booking.paymentStatus === "unpaid";
+  const isCompleted = booking.status === "completed";
   const unitLabel = booking.pricingUnit === "hourly" ? "hours" : booking.pricingUnit === "weekly" ? "weeks" : "days";
   const durationLabel =
     booking.pricingUnit === "hourly"
@@ -154,7 +159,7 @@ function BookingCard({ booking, mode, onAction, busyId }) {
             {money(booking.pricingSnapshot?.totalAmount, currency)}
           </div>
           <div className="mt-1 flex flex-wrap justify-end gap-1">
-            <StatusPill>{booking.status}</StatusPill>
+            <StatusPill tone={isCompleted ? "success" : "neutral"}>{booking.status}</StatusPill>
             <StatusPill tone="payment">{booking.paymentStatus}</StatusPill>
           </div>
         </div>
@@ -191,13 +196,17 @@ function BookingCard({ booking, mode, onAction, busyId }) {
         </div>
       ) : null}
 
-      {booking.returnFlow?.requestedAt ? (
+      {booking.returnFlow?.confirmedAt ? (
+        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+          Return completed on {formatDateTime(booking.returnFlow.confirmedAt)}
+          {booking.returnFlow?.requestedAt
+            ? ` (requested ${formatDateTime(booking.returnFlow.requestedAt)})`
+            : ""}
+        </div>
+      ) : booking.returnFlow?.requestedAt ? (
         <div className="mt-3 rounded-xl bg-black/[0.03] px-3 py-2 text-xs font-semibold text-black/60">
           {booking.returnFlow?.requestedBy ? "Return requested" : "Auto return initiated"} on{" "}
           {formatDateTime(booking.returnFlow.requestedAt)}
-          {booking.returnFlow?.confirmedAt
-            ? ` | Confirmed on ${formatDateTime(booking.returnFlow.confirmedAt)}`
-            : ""}
         </div>
       ) : null}
 
@@ -267,7 +276,7 @@ function BookingCard({ booking, mode, onAction, busyId }) {
           </Button>
         ) : null}
 
-        {mode === "owner" && !canOwnerConfirmReturn ? (
+        {mode === "owner" && !canOwnerConfirmReturn && !isCompleted ? (
           <Button type="button" variant="secondary" disabled>
             Confirm return
           </Button>
@@ -386,6 +395,12 @@ function BookingCard({ booking, mode, onAction, busyId }) {
           The renter says the product has been returned. Confirm it after inspection or handoff.
         </div>
       ) : null}
+
+      {booking.status === "completed" ? (
+        <div className="mt-3 text-xs font-semibold text-emerald-700">
+          This order is fully completed and archived in your booking history.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -432,6 +447,10 @@ function ListingCard({ listing, onDelete, deletingId }) {
   const imageUrl = getPrimaryImageUrl(listing.images);
   const busy = deletingId === listing._id;
   const publicProductPath = listing.slug || listing._id;
+  const viewPath =
+    listing.status === "active"
+      ? `/products/${publicProductPath}`
+      : `/owner/listings/${listing._id}/preview`;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-black/10 bg-white shadow-sm shadow-black/5">
@@ -463,7 +482,7 @@ function ListingCard({ listing, onDelete, deletingId }) {
           <Button as={Link} to={`/products/${listing._id}/edit`}>
             Edit
           </Button>
-          <Button variant="secondary" as={Link} to={`/products/${publicProductPath}`}>
+          <Button variant="secondary" as={Link} to={viewPath}>
             View
           </Button>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => onDelete(listing)}>

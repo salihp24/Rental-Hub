@@ -6,7 +6,7 @@ export default function AdminHeader({ error, onRefresh }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black">Admin Control Panel</h1>
-          <p className="text-sm text-black/60">Moderate users, products, bookings, and audits.</p>
+          <p className="text-sm text-black/60">Manage users, products, bookings, and activity records.</p>
         </div>
         <Button onClick={onRefresh}>Refresh</Button>
       </div>

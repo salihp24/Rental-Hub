@@ -5,6 +5,7 @@ import Product from "../models/Product.js";
 import User from "../models/User.js";
 import AppError from "../utils/AppError.js";
 import { computePricing } from "../utils/Pricing.js";
+import { createAndEmitNotification } from "./notification.services.js";
 
 //What extra data should be fetched along with conversation/message - Instead of just userId we get → name, email, avatar
 const CONVERSATION_POPULATE = [
@@ -24,6 +25,12 @@ const MESSAGE_POPULATE = [{ path: "sender", select: "name email avatar role" }];
 const dedupeObjectIds = (values = []) => [
   ...new Set(values.filter(Boolean).map((value) => String(value))),
 ];
+
+const buildProductConversationKey = (productId, participantIds = []) => {
+  if (!productId || participantIds.length < 2) return null;
+  const pair = [...participantIds].map(String).sort();
+  return `product:${String(productId)}:users:${pair.join(":")}`;
+};
 
 const toIdString = (value) => {
   if (!value) return "";
@@ -141,6 +148,42 @@ const emitConversationUpdate = (io, conversation) => {
       conversation: buildConversationSummary(conversation, participant._id || participant),
     });
   }
+};
+
+const emitConversationNotification = async ({
+  io,
+  conversation,
+  actorId,
+  actorLabel,
+  type,
+  title,
+  body,
+  dedupe = null,
+}) => {
+  if (!io || !conversation?.participants?.length) return;
+
+  await Promise.all(
+    conversation.participants.map((participant) => {
+      const participantId = String(participant?._id || participant);
+      if (!participantId || participantId === String(actorId)) {
+        return Promise.resolve();
+      }
+
+      return createAndEmitNotification({
+        io,
+        userId: participantId,
+        type,
+        title,
+        body,
+        dedupe,
+        data: {
+          conversationId: String(conversation._id),
+          actorId: String(actorId),
+          actorLabel,
+        },
+      });
+    })
+  );
 };
 
 const buildOfferText = (amount, currency) =>
@@ -331,17 +374,49 @@ export const createConversationService = async (payload, user) => {
     throw new AppError("A conversation needs at least two participants.", 400);
   }
 
+  if (payload.productId) {
+    const existingProductConversation = await Conversation.findOne({
+      product: payload.productId,
+      participants: { $all: participantIds },
+    }).populate(CONVERSATION_POPULATE);
+
+    if (existingProductConversation) {
+      const expectedKey = buildProductConversationKey(payload.productId, participantIds);
+      if (expectedKey && existingProductConversation.productConversationKey !== expectedKey) {
+        existingProductConversation.productConversationKey = expectedKey;
+        await existingProductConversation.save();
+      }
+      return existingProductConversation;
+    }
+  }
+
   await ensureUsersExist(participantIds);
 
-  const conversation = await Conversation.create({
-    participants: participantIds,
-    participantStates: getOrCreateParticipantStates(participantIds),
-    product: payload.productId || null,
-    createdBy: user._id,
-    title: payload.title || "",
-  });
+  const productConversationKey = payload.productId
+    ? buildProductConversationKey(payload.productId, participantIds)
+    : null;
 
-  return populateConversationById(conversation._id);
+  try {
+    const conversation = await Conversation.create({
+      participants: participantIds,
+      participantStates: getOrCreateParticipantStates(participantIds),
+      product: payload.productId || null,
+      productConversationKey,
+      createdBy: user._id,
+      title: payload.title || "",
+    });
+
+    return populateConversationById(conversation._id);
+  } catch (error) {
+    // If two requests race, unique key ensures one wins; return the existing thread.
+    if (error?.code === 11000 && productConversationKey) {
+      const existingConversation = await Conversation.findOne({
+        productConversationKey,
+      }).populate(CONVERSATION_POPULATE);
+      if (existingConversation) return existingConversation;
+    }
+    throw error;
+  }
 };
 
 //Fetch one conversation - Also checks access
@@ -425,6 +500,20 @@ export const sendMessageService = async (conversationId, payload, user, io = nul
         message: populatedMessage,
       });
       emitConversationUpdate(io, populatedConversation);
+      await emitConversationNotification({
+        io,
+        conversation: populatedConversation,
+        actorId: user._id,
+        actorLabel: user.name || user.email || "A user",
+        type: "chat_message",
+        title: "New message",
+        body: `${user.name || user.email || "A user"} sent you a message.`,
+        dedupe: {
+          enabled: true,
+          key: `chat_message:${String(populatedConversation._id)}`,
+          actorLabel: user.name || user.email || "Someone",
+        },
+      });
     }
 
     return {
@@ -510,7 +599,19 @@ export const sendOfferService = async (conversationId, payload, user, io = null)
   touchUnreadCounts(conversation, user._id);
   await conversation.save();
 
-  return emitMessageAndConversation(io, conversation._id, message._id);
+  const result = await emitMessageAndConversation(io, conversation._id, message._id);
+
+  await emitConversationNotification({
+    io,
+    conversation: result.conversation,
+    actorId: user._id,
+    actorLabel: user.name || user.email || "A user",
+    type: "offer_created",
+    title: "New price request",
+    body: `${user.name || user.email || "A user"} sent a price request.`,
+  });
+
+  return result;
 };
 
 export const respondToOfferService = async (
@@ -642,7 +743,25 @@ export const respondToOfferService = async (
   touchUnreadCounts(conversation, user._id);
   await conversation.save();
 
-  return emitMessageAndConversation(io, conversation._id, offerMessage._id);
+  const result = await emitMessageAndConversation(io, conversation._id, offerMessage._id);
+
+  const actionLabelMap = {
+    accepted: "accepted",
+    rejected: "rejected",
+    cancelled: "cancelled",
+  };
+
+  await emitConversationNotification({
+    io,
+    conversation: result.conversation,
+    actorId: user._id,
+    actorLabel: user.name || user.email || "A user",
+    type: "offer_updated",
+    title: "Price request updated",
+    body: `${user.name || user.email || "A user"} ${actionLabelMap[action] || "updated"} a price request.`,
+  });
+
+  return result;
 };
 
 export const getAcceptedNegotiationForBookingService = async ({
@@ -679,7 +798,18 @@ export const getAcceptedNegotiationForBookingService = async ({
     query["offer.endDate"] = normalized.end;
   }
 
-  const acceptedOffer = await Message.findOne(query).sort({ "offer.respondedAt": -1 });
+  let acceptedOffer = await Message.findOne(query).sort({ "offer.respondedAt": -1 });
+
+  // If exact date-time equality misses (timezone/precision differences),
+  // fall back to an overlap match for the same renter-owner-product context.
+  if (!acceptedOffer && !bookingId && startDate && endDate) {
+    const normalized = normalizeOfferWindow(startDate, endDate, pricingUnit);
+    acceptedOffer = await Message.findOne({
+      ...query,
+      "offer.startDate": { $lt: normalized.end },
+      "offer.endDate": { $gt: normalized.start },
+    }).sort({ "offer.respondedAt": -1 });
+  }
 
   if (!acceptedOffer?.offer?.amount) {
     return null;
@@ -691,6 +821,7 @@ export const getAcceptedNegotiationForBookingService = async ({
     currency: acceptedOffer.offer.currency || "INR",
     acceptedOfferId: acceptedOffer._id,
     pricingUnit: acceptedOffer.offer.pricingUnit || pricingUnit,
+    totalUnits: Number(acceptedOffer.offer.totalUnits || 0),
     bookingId: acceptedOffer.offer.booking || null,
     startDate: acceptedOffer.offer.startDate || null,
     endDate: acceptedOffer.offer.endDate || null,

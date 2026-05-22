@@ -109,7 +109,7 @@ async function propagateDescendantsMeta(nodeSnapshot) {
 }
 
 //Fetch categories from DB based on filters like parent, search, active status, and pagination
-export const listCategoriesService = async (query) => {
+export const listCategoriesService = async (query, requester = null) => {
   const {
     parent,
     isActive,
@@ -120,9 +120,14 @@ export const listCategoriesService = async (query) => {
   } = query;
 
   const filter = {};
+  const isAdmin = requester?.hasRole?.("admin");
 
   if (typeof isActive === "boolean" && isActive === false) {
-    filter.isActive = false;
+    if (isAdmin) {
+      filter.isActive = false;
+    } else {
+      Object.assign(filter, activeEligibilityFilter());
+    }
   } else {
     Object.assign(filter, activeEligibilityFilter());
   }

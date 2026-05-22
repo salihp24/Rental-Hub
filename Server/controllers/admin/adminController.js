@@ -1,17 +1,47 @@
 import asyncHandler from "../../utils/asyncHandler.js";
+import User from "../../models/User.js";
+import AppError from "../../utils/AppError.js";
+import { sendAuthResponse } from "../../utils/auth.js";
 import {
   getAdminDashboardStatsService,
   getAdminHealthService,
   listAdminBookingsService,
   listAdminAuditLogsSummaryService,
+  getAdminFinanceSummaryService,
   listAdminProductsService,
   listAdminUsersService,
   updateAdminBookingStatusService,
   updateAdminProductStatusService,
   updateAdminProductFeaturedService,
   updateAdminUserRoleService,
+  updateAdminOwnerActivityService,
   updateAdminUserStatusService,
 } from "../../Services/admin/admin.services.js";
+
+export const loginAdmin = asyncHandler(async (req, res, next) => {
+  const { email, password } = req.body;
+
+  const user = await User.findOne({ email }).select("+password");
+
+  if (!user || !user.password) {
+    return next(new AppError("Invalid email or password.", 401));
+  }
+
+  const isPasswordValid = await user.comparePassword(password);
+
+  if (!isPasswordValid) {
+    return next(new AppError("Invalid email or password.", 401));
+  }
+
+  if (!user.hasRole("admin")) {
+    return next(new AppError("Administrator access is required.", 403));
+  }
+
+  user.lastLogin = new Date();
+  await user.save({ validateBeforeSave: false });
+
+  return sendAuthResponse(res, 200, user);
+});
 
 
 //just for checking health
@@ -29,7 +59,7 @@ export const getAdminHealth = asyncHandler(async (req, res) => {
 
 //dashboard stats 
 export const getAdminDashboardStats = asyncHandler(async (req, res) => {
-  const stats = await getAdminDashboardStatsService();
+  const stats = await getAdminDashboardStatsService(req.query);
 
   res.status(200).json({
     status: "success",
@@ -78,6 +108,22 @@ export const updateAdminUserRole = asyncHandler(async (req, res) => {
     adminUser: req.user,
     targetUserId: req.params.userId,
     role: req.body.role,
+  });
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      user,
+    },
+  });
+});
+
+export const updateAdminOwnerActivity = asyncHandler(async (req, res) => {
+  const user = await updateAdminOwnerActivityService({
+    adminUser: req.user,
+    targetUserId: req.params.userId,
+    suspended: req.body.suspended,
+    reason: req.body.reason,
   });
 
   res.status(200).json({
@@ -185,6 +231,17 @@ export const listAdminAuditLogs = asyncHandler(async (req, res) => {
     },
     data: {
       logs: result.logs,
+    },
+  });
+});
+
+export const getAdminFinanceSummary = asyncHandler(async (req, res) => {
+  const finance = await getAdminFinanceSummaryService(req.query);
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      finance,
     },
   });
 });

@@ -7,12 +7,16 @@ export const signToken = (userId) =>
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   });
 
-export const getCookieOptions = () => ({
-  httpOnly: true,
-  sameSite: "lax",
-  secure: process.env.NODE_ENV === "production",
-  maxAge: COOKIE_MAX_AGE_MS,
-});
+export const getCookieOptions = () => {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    maxAge: COOKIE_MAX_AGE_MS,
+  };
+};
 
 export const sanitiseUser = (user) => {
   const userObject = user.toObject ? user.toObject() : { ...user };
@@ -31,7 +35,6 @@ export const sendAuthResponse = (res, statusCode, user) => {
 
   res.status(statusCode).json({
     status: "success",
-    token,
     data: {
       user: sanitiseUser(user),
     },

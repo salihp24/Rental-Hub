@@ -1,24 +1,29 @@
-# Dependencies
-node_modules/
-Client/node_modules/
-Server/node_modules/
-
-# Environment variables
+# Environment files
 .env
+.env.*
+!.env.example
+!**/.env.example
+
+# Dependencies
+node_modules
+Client/node_modules
+Server/node_modules
+
+# Build files
+dist
+Client/dist
+build
 
 # Logs
+logs
 *.log
 
 # Runtime uploads
 Server/uploads/
-
-# Build files
-dist/
-build/
 
 # OS files
 .DS_Store
 Thumbs.db
 
 # IDE files
-.vscode/git add
+.vscode/

@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+:root {
+  --rh-blue-50: #eff6ff;
+  --rh-blue-100: #dbeafe;
+  --rh-blue-200: #bfdbfe;
+  --rh-blue-500: #3b82f6;
+  --rh-blue-600: #2563eb;
+  --rh-blue-700: #1d4ed8;
+  --rh-slate-700: #334155;
+  --rh-slate-900: #0f172a;
+}
+
 html,
 body {
   height: 100%;
@@ -7,7 +18,31 @@ body {
 
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
-    Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-  color: #0b0b0b;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--rh-slate-900);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.12), transparent 30%),
+    radial-gradient(circle at 100% 100%, rgba(37, 99, 235, 0.08), transparent 32%),
+    linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+}
+
+#root {
+  min-height: 100%;
+}
+
+@layer base {
+  ::selection {
+    background: var(--rh-blue-200);
+    color: var(--rh-slate-900);
+  }
+}
+
+@layer components {
+  .rh-surface {
+    @apply rounded-3xl border border-blue-100 bg-white shadow-[0_14px_40px_rgba(37,99,235,0.10)];
+  }
+
+  .rh-muted {
+    @apply text-slate-600;
+  }
 }

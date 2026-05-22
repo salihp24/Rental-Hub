@@ -30,6 +30,18 @@ const loginBodySchema = Joi.object({
   password: Joi.string().min(6).max(128).required(),
 });
 
+const forgotPasswordBodySchema = Joi.object({
+  email: Joi.string().trim().lowercase().email().required(),
+});
+
+const resetPasswordBodySchema = Joi.object({
+  password: Joi.string().min(6).max(128).required(),
+});
+
+const resetPasswordParamsSchema = Joi.object({
+  token: Joi.string().trim().hex().length(64).required(),
+});
+
 const updateProfileBodySchema = Joi.object({
   name: Joi.string().trim().min(2).max(50),
   email: Joi.string().trim().lowercase().email(),
@@ -54,6 +66,8 @@ const userIdParamsSchema = Joi.object({
 export const userValidation = {
   register: { body: registerBodySchema },
   login: { body: loginBodySchema },
+  forgotPassword: { body: forgotPasswordBodySchema },
+  resetPassword: { body: resetPasswordBodySchema, params: resetPasswordParamsSchema },
   updateProfile: { body: updateProfileBodySchema },
   updateOwnerProfile: { body: updateOwnerProfileBodySchema },
   updatePassword: { body: updatePasswordBodySchema },

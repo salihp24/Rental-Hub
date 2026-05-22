@@ -45,6 +45,11 @@ const conversationSchema = new mongoose.Schema(
       ref: "Product",
       default: null,
     },
+    productConversationKey: {
+      type: String,
+      trim: true,
+      default: null,
+    },
 
     //who started
     createdBy: {
@@ -124,6 +129,13 @@ const conversationSchema = new mongoose.Schema(
 
 //Creating index, otherwise  seach all documents - Mainly finding chats that a person involved
 conversationSchema.index({ participants: 1 });
+conversationSchema.index(
+  { productConversationKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { productConversationKey: { $type: "string" } },
+  }
+);
 
 //Creates an index on booking - Ensures only one conversation per booking
 conversationSchema.index(

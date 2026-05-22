@@ -9,7 +9,7 @@ import {
 } from "../Services/category.services.js";
 
 export const listCategories = asyncHandler(async (req, res) => {
-  const result = await listCategoriesService(req.query);
+  const result = await listCategoriesService(req.query, req.user || null);
 
   res.status(200).json({
     status: "success",

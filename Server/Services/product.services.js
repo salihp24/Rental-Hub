@@ -1,5 +1,6 @@
 import Product from "../models/Product.js";
 import Category from "../models/Category.js";
+import Booking from "../models/Booking.js";
 import mongoose from "mongoose";
 import AppError from "../utils/AppError.js";
 import { buildUniqueProductSlug } from "../utils/Slug.js";
@@ -10,6 +11,9 @@ import { assertCloudinaryImages, isCloudinaryImageUrl } from "../utils/cloudinar
 
 // CREATE PRODUCT
 export const createProductService = async (data, user) => {
+  if (user.ownerProfile?.activitySuspended) {
+    throw new AppError("Owner activity is suspended. You cannot create new listings right now.", 403);
+  }
   // Find the selected category first.
   // We only need minimal fields here to validate whether listing is allowed.
   const category = await Category.findById(data.category).select("_id isActive");
@@ -63,6 +67,7 @@ export const getProductsService = async (query) => {
     owner,
     featured,
     city,
+    district,
     state,
     lat,
     lng,
@@ -110,8 +115,9 @@ export const getProductsService = async (query) => {
   // Match condition such as new / good / fair.
   if (condition) filter.condition = condition;
 
-  // Default to only active listings unless another status is explicitly requested.
-  filter.status = status || "active";
+  // Public browse must never expose non-active listings.
+  // Admin moderation and owner listing management have dedicated protected routes.
+  filter.status = "active";
 
   if (minPrice || maxPrice) {
     // Build a range filter for the product's daily price.
@@ -175,6 +181,59 @@ export const getProductsService = async (query) => {
   // Convert page and limit into the number of documents to skip.
   const skip = (Number(page) - 1) * Number(limit);
 
+  const escapedDistrict =
+    typeof district === "string" && district.trim()
+      ? district.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      : "";
+  const shouldPrioritizeDistrict = Boolean(escapedDistrict) && sort !== "nearest";
+
+  if (shouldPrioritizeDistrict) {
+    const baseSort = sortMap[sort] || sortMap.newest;
+    const districtRegex = new RegExp(escapedDistrict, "i");
+
+    const [prioritizedIds, total] = await Promise.all([
+      Product.aggregate([
+        { $match: filter },
+        {
+          $addFields: {
+            _districtPriority: {
+              $cond: [
+                {
+                  $or: [
+                    { $regexMatch: { input: { $ifNull: ["$location.city", ""] }, regex: districtRegex } },
+                    { $regexMatch: { input: { $ifNull: ["$location.address", ""] }, regex: districtRegex } },
+                  ],
+                },
+                0,
+                1,
+              ],
+            },
+          },
+        },
+        { $sort: { _districtPriority: 1, ...baseSort } },
+        { $skip: skip },
+        { $limit: Number(limit) },
+        { $project: { _id: 1 } },
+      ]),
+      Product.countDocuments(filter),
+    ]);
+
+    const orderedIds = prioritizedIds.map((item) => String(item._id));
+    const hydratedProducts = await Product.find({
+      _id: { $in: prioritizedIds.map((item) => item._id) },
+    })
+      .select("-blockedDates -__v")
+      .populate("category", "name slug parent level")
+      .populate("owner", "name avatar ratings.asOwner");
+
+    const orderLookup = new Map(orderedIds.map((id, index) => [id, index]));
+    const products = hydratedProducts.sort(
+      (a, b) => (orderLookup.get(String(a._id)) ?? 0) - (orderLookup.get(String(b._id)) ?? 0)
+    );
+
+    return { products, total, page, limit };
+  }
+
   // Fetch matching products and total count in parallel.
   // This helps the UI show both the current page and pagination info.
   const [products, total] = await Promise.all([
@@ -192,6 +251,82 @@ export const getProductsService = async (query) => {
   return { products, total, page, limit };
 };
 
+export const getProductSuggestionsService = async (query) => {
+  const { search, district, city, limit = 6 } = query;
+  const normalizedSearch = String(search || "").trim();
+
+  if (!normalizedSearch) {
+    return { suggestions: [] };
+  }
+
+  const escapedSearch = normalizedSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const searchRegex = new RegExp(escapedSearch, "i");
+  const escapedDistrict =
+    typeof district === "string" && district.trim()
+      ? district.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      : "";
+  const escapedCity =
+    typeof city === "string" && city.trim()
+      ? city.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      : "";
+  const districtRegex = escapedDistrict ? new RegExp(escapedDistrict, "i") : null;
+  const cityRegex = escapedCity ? new RegExp(escapedCity, "i") : null;
+
+  const locationPriorityBranches = [];
+  if (districtRegex) {
+    locationPriorityBranches.push({
+      case: {
+        $or: [
+          { $regexMatch: { input: { $ifNull: ["$location.city", ""] }, regex: districtRegex } },
+          { $regexMatch: { input: { $ifNull: ["$location.address", ""] }, regex: districtRegex } },
+        ],
+      },
+      then: 0,
+    });
+  }
+  if (cityRegex) {
+    locationPriorityBranches.push({
+      case: { $regexMatch: { input: { $ifNull: ["$location.city", ""] }, regex: cityRegex } },
+      then: 1,
+    });
+  }
+
+  const suggestions = await Product.aggregate([
+    {
+      $match: {
+        status: "active",
+        $or: [{ title: { $regex: searchRegex } }, { description: { $regex: searchRegex } }],
+      },
+    },
+    {
+      $addFields: {
+        _locationPriority: locationPriorityBranches.length
+          ? { $switch: { branches: locationPriorityBranches, default: 2 } }
+          : 0,
+        _titleStartsWith: {
+          $cond: [{ $regexMatch: { input: "$title", regex: new RegExp(`^${escapedSearch}`, "i") } }, 0, 1],
+        },
+      },
+    },
+    { $sort: { _locationPriority: 1, _titleStartsWith: 1, totalRentals: -1, createdAt: -1 } },
+    { $limit: Number(limit) },
+    {
+      $project: {
+        _id: 1,
+        slug: 1,
+        title: 1,
+        "location.city": 1,
+        "location.state": 1,
+        "pricing.daily.rate": 1,
+        "pricing.currency": 1,
+        images: { $slice: ["$images", 1] },
+      },
+    },
+  ]);
+
+  return { suggestions };
+};
+
 // GET SINGLE PRODUCT
 export const getProductByIdentifierService = async (identifier) => {
   // Fetch one product with related category and owner details.
@@ -199,13 +334,34 @@ export const getProductByIdentifierService = async (identifier) => {
     ? { $or: [{ _id: identifier }, { slug: identifier }] }
     : { slug: identifier };
 
-  const product = await Product.findOne(finder)
+  const product = await Product.findOne({
+    ...finder,
+    status: "active",
+  })
     .select("-__v")
     .populate("category", "name slug attributes parent ancestors level")
     .populate("owner", "name avatar phone ownerProfile ratings.asOwner createdAt");
 
   // If the id is valid but no document exists, return 404.
   if (!product) throw new AppError("Product not found.", 404);
+
+  return product;
+};
+
+export const getProductPreviewService = async (productId, user) => {
+  const product = await Product.findById(productId)
+    .select("-__v")
+    .populate("category", "name slug attributes parent ancestors level")
+    .populate("owner", "name avatar phone ownerProfile ratings.asOwner createdAt");
+
+  if (!product) throw new AppError("Product not found.", 404);
+
+  const isOwner = product.owner?._id?.equals?.(user._id) || String(product.owner?._id) === String(user._id);
+  const isAdmin = user?.hasRole?.("admin");
+
+  if (!isOwner && !isAdmin) {
+    throw new AppError("Not allowed to preview this product.", 403);
+  }
 
   return product;
 };
@@ -223,6 +379,10 @@ export const updateProductService = async (productId, data, user) => {
 
   if (!isOwner && !isAdmin)
     throw new AppError("Not allowed to update.", 403);
+
+  if (isOwner && !isAdmin && user.ownerProfile?.activitySuspended) {
+    throw new AppError("Owner activity is suspended. Listing updates are temporarily disabled.", 403);
+  }
 
   if (!isAdmin) {
     if (Object.prototype.hasOwnProperty.call(data, "status")) {
@@ -307,9 +467,24 @@ export const deleteProductService = async (productId, user) => {
   if (!isOwner && !isAdmin)
     throw new AppError("Not allowed to delete.", 403);
 
-  // Do not allow deletion while the item is currently rented.
-  if (product.status === "rented")
-    throw new AppError("Currently rented.", 400);
+  if (isOwner && !isAdmin && user.ownerProfile?.activitySuspended) {
+    throw new AppError("Owner activity is suspended. Listing deletion is temporarily disabled.", 403);
+  }
+
+  // Do not allow deletion when booking lifecycle is still in progress.
+  // Terminal statuses (completed/cancelled/rejected) are safe for deletion.
+  const hasOpenBookings = await Booking.exists({
+    product: product._id,
+    status: {
+      $in: ["pending", "confirmed", "active", "return_requested"],
+    },
+  });
+  if (hasOpenBookings) {
+    throw new AppError(
+      "Cannot delete this listing while it has active or pending bookings.",
+      400
+    );
+  }
 
   const imagePublicIds = product.images
     .filter((image) => isCloudinaryImageUrl(image?.url))

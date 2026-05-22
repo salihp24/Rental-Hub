@@ -3,28 +3,13 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { io } from "socket.io-client";
 import api from "../lib/api";
+import { resolveSocketUrl } from "../lib/socket";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 import Textarea from "../components/ui/Textarea";
 
 const CONVERSATIONS_POLL_MS = 120000;
 const MESSAGES_POLL_MS = 90000;
-
-const resolveSocketUrl = () => {
-  const explicit = import.meta.env.VITE_SOCKET_URL?.trim();
-  if (explicit) return explicit;
-
-  const apiBase = import.meta.env.VITE_API_BASE_URL?.trim();
-  if (apiBase && /^https?:\/\//i.test(apiBase)) {
-    return new URL(apiBase).origin;
-  }
-
-  if (import.meta.env.DEV) {
-    return "http://localhost:5000";
-  }
-
-  return window.location.origin;
-};
 
 const formatConversationTime = (value) => {
   if (!value) return "";
@@ -94,12 +79,15 @@ function buildConversationSubtitle(conversation, currentUserId) {
 
 export default function ChatPage() {
   const navigate = useNavigate();
-  const { user, token } = useSelector((state) => state.auth);
+  const { user } = useSelector((state) => state.auth);
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedConversationId = searchParams.get("conversation") || "";
   const bookingId = searchParams.get("booking") || "";
   const productId = searchParams.get("product") || "";
   const participantId = searchParams.get("participant") || "";
+  const initialPricingUnit = searchParams.get("pricingUnit") === "weekly" ? "weekly" : "daily";
+  const initialStartDate = searchParams.get("startDate") || "";
+  const initialEndDate = searchParams.get("endDate") || "";
 
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -107,13 +95,15 @@ export default function ChatPage() {
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [composerText, setComposerText] = useState("");
   const [offerAmount, setOfferAmount] = useState("");
-  const [offerStartDate, setOfferStartDate] = useState("");
-  const [offerEndDate, setOfferEndDate] = useState("");
+  const [offerPricingUnit, setOfferPricingUnit] = useState(initialPricingUnit);
+  const [offerStartDate, setOfferStartDate] = useState(initialStartDate);
+  const [offerEndDate, setOfferEndDate] = useState(initialEndDate);
   const [sending, setSending] = useState(false);
   const [offerBusy, setOfferBusy] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [error, setError] = useState("");
   const socketRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const selectedConversationIdRef = useRef("");
   const userIdRef = useRef("");
 
@@ -232,10 +222,9 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!token || !user?._id) return undefined;
+    if (!user?._id) return undefined;
 
     const socket = io(resolveSocketUrl(), {
-      auth: { token },
       transports: ["websocket", "polling"],
       withCredentials: true,
     });
@@ -277,7 +266,7 @@ export default function ChatPage() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [token, upsertConversation, user?._id]);
+  }, [upsertConversation, user?._id]);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -354,11 +343,19 @@ export default function ChatPage() {
         selectedConversation?.product?.pricing?.daily?.rate ??
         "";
       setOfferAmount(nextAmount ? String(nextAmount) : "");
-      setOfferStartDate("");
-      setOfferEndDate("");
+      setOfferPricingUnit(initialPricingUnit || "daily");
+      setOfferStartDate(initialStartDate || "");
+      setOfferEndDate(initialEndDate || "");
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [selectedConversation?._id, selectedConversation?.negotiation?.finalRate, selectedConversation?.product?.pricing?.daily?.rate]);
+  }, [
+    initialEndDate,
+    initialPricingUnit,
+    initialStartDate,
+    selectedConversation?._id,
+    selectedConversation?.negotiation?.finalRate,
+    selectedConversation?.product?.pricing?.daily?.rate,
+  ]);
 
   useEffect(() => {
     if (!selectedConversationId || !selectedConversation?.unreadCount) return undefined;
@@ -393,6 +390,12 @@ export default function ChatPage() {
       cancelled = true;
     };
   }, [selectedConversation?.unreadCount, selectedConversationId]);
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [messages, selectedConversationId]);
 
   useEffect(() => {
     if (!selectedConversationId) return undefined;
@@ -480,7 +483,7 @@ export default function ChatPage() {
       };
 
       if (!selectedConversation?.booking) {
-        payload.pricingUnit = "daily";
+        payload.pricingUnit = offerPricingUnit || "daily";
         payload.startDate = offerStartDate;
         payload.endDate = offerEndDate;
       }
@@ -503,13 +506,14 @@ export default function ChatPage() {
         await loadConversations();
       }
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || "Could not send price proposal.");
+      setError(err?.response?.data?.message || err.message || "Could not send your price request.");
     } finally {
       setOfferBusy(false);
     }
   }, [
     loadConversations,
     offerAmount,
+    offerPricingUnit,
     offerEndDate,
     offerStartDate,
     selectedConversation,
@@ -542,7 +546,7 @@ export default function ChatPage() {
         await loadConversations();
       }
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || "Could not update proposal.");
+      setError(err?.response?.data?.message || err.message || "Could not update the price request.");
     } finally {
       setOfferBusy(false);
     }
@@ -556,14 +560,14 @@ export default function ChatPage() {
             Messages
           </div>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-black md:text-3xl">
-            Conversations with owners and renters.
+            Conversations with owners and renters
           </h1>
           <p className="mt-2 text-sm font-semibold text-black/60">
-            Keep rental questions, booking context, and updates in one organized place.
+            Keep all booking questions and updates in one place.
           </p>
         </div>
         <Button variant="secondary" as={Link} to="/account">
-          Back to account
+          Back to Account
         </Button>
       </div>
 
@@ -573,16 +577,16 @@ export default function ChatPage() {
         </div>
       ) : null}
 
-      <section className="grid min-h-[70vh] gap-6 lg:grid-cols-[340px_1fr]">
+      <section className="grid h-[calc(100vh-140px)] min-h-[680px] gap-6 lg:grid-cols-[340px_1fr]">
         <aside className="overflow-hidden rounded-3xl border border-black/10 bg-white shadow-sm shadow-black/5">
           <div className="border-b border-black/10 px-5 py-4">
             <div className="text-sm font-extrabold text-black">Conversations</div>
             <div className="mt-1 text-xs font-semibold text-black/50">
-              {conversations.length} thread{conversations.length === 1 ? "" : "s"}
+              {conversations.length} conversation{conversations.length === 1 ? "" : "s"}
             </div>
           </div>
 
-          <div className="max-h-[70vh] overflow-y-auto">
+          <div className="h-full max-h-[calc(100vh-260px)] overflow-y-auto">
             {listLoading || bootstrapping ? (
               <div className="space-y-3 p-4">
                 {Array.from({ length: 5 }).map((_, index) => (
@@ -654,13 +658,13 @@ export default function ChatPage() {
               </div>
             ) : (
               <div className="p-5 text-sm font-semibold text-black/50">
-                No conversations yet. Start a chat from a product or booking page.
+                No conversations yet. Start a conversation from a product or booking page.
               </div>
             )}
           </div>
         </aside>
 
-        <div className="flex min-h-[70vh] flex-col overflow-hidden rounded-3xl border border-black/10 bg-white shadow-sm shadow-black/5">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-black/10 bg-white shadow-sm shadow-black/5">
           {selectedConversation ? (
             <>
               <div className="border-b border-black/10 px-5 py-4">
@@ -689,27 +693,30 @@ export default function ChatPage() {
                 {selectedConversation.negotiation?.status === "accepted" &&
                 selectedConversation.negotiation?.finalRate ? (
                   <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-                    Negotiated price locked for this chat:{" "}
+                    Agreed price for this conversation:{" "}
                     {money(
                       selectedConversation.negotiation.finalRate,
                       selectedConversation.negotiation.currency || "INR"
                     )}{" "}
-                    per day.
+                    per {selectedConversation.negotiation.finalPricingUnit || "day"}.
                   </div>
                 ) : null}
                 {selectedConversation.negotiation?.status === "pending" ? (
                   <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                    A price proposal is waiting for owner review.
+                    A price request is waiting for the owner?s response.
                   </div>
                 ) : null}
                 {selectedConversation.booking && canNegotiateBooking ? (
                   <div className="mt-3 rounded-2xl border border-black/10 bg-black/[0.03] px-4 py-3 text-sm font-semibold text-black/65">
-                    This booking is still negotiable until payment is completed.
+                    Price discussion is available until payment is completed.
                   </div>
                 ) : null}
               </div>
 
-              <div className="flex-1 space-y-3 overflow-y-auto bg-[#FFF7D1]/25 p-5">
+              <div
+                ref={messagesContainerRef}
+                className="flex-1 space-y-3 overflow-y-auto bg-[#FFF7D1]/25 p-5"
+              >
                 {messagesLoading ? (
                   Array.from({ length: 4 }).map((_, index) => (
                     <div
@@ -755,12 +762,12 @@ export default function ChatPage() {
                                   message.offer?.amount,
                                   message.offer?.currency || selectedConversation?.product?.pricing?.currency || "INR"
                                 )}{" "}
-                                per day
+                                per {message.offer?.pricingUnit || "day"}
                               </div>
                               <div className={`text-xs font-semibold ${
                                 mine ? "text-white/75" : "text-black/55"
                               }`}>
-                                Status: {message.offer?.status || "pending"}
+                                Current status: {message.offer?.status || "pending"}
                               </div>
                               {canOwnerRespondToOffer ? (
                                 <div className="flex flex-wrap gap-2">
@@ -788,7 +795,7 @@ export default function ChatPage() {
                                   disabled={offerBusy}
                                   onClick={() => handleOfferResponse(message._id, "cancelled")}
                                 >
-                                  Cancel offer
+                                  Cancel Request
                                 </Button>
                               ) : null}
                             </div>
@@ -825,7 +832,7 @@ export default function ChatPage() {
                       <div className="flex flex-col gap-3 md:flex-row md:items-end">
                         <label className="flex-1 space-y-2">
                           <span className="text-xs font-extrabold text-black/70">
-                            Offer a daily price
+                            Request a price
                           </span>
                           <Input
                             type="number"
@@ -833,7 +840,7 @@ export default function ChatPage() {
                             step="0.01"
                             value={offerAmount}
                             onChange={(event) => setOfferAmount(event.target.value)}
-                            placeholder="Enter your offer amount"
+                            placeholder="Enter your requested amount"
                           />
                         </label>
                         <Button
@@ -845,11 +852,22 @@ export default function ChatPage() {
                           }
                           onClick={handleSendOffer}
                         >
-                          {offerBusy ? "Sending..." : "Send offer"}
+                          {offerBusy ? "Sending..." : "Send Request"}
                         </Button>
                       </div>
                       {!selectedConversation?.booking ? (
                         <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <label className="space-y-2 md:col-span-2">
+                            <span className="text-xs font-extrabold text-black/70">Pricing unit</span>
+                            <select
+                              value={offerPricingUnit}
+                              onChange={(event) => setOfferPricingUnit(event.target.value)}
+                              className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm font-semibold outline-none focus:border-black/25 focus:ring-2 focus:ring-black/10"
+                            >
+                              <option value="daily">daily</option>
+                              <option value="weekly">weekly</option>
+                            </select>
+                          </label>
                           <label className="space-y-2">
                             <span className="text-xs font-extrabold text-black/70">Offer start date</span>
                             <Input
@@ -874,7 +892,7 @@ export default function ChatPage() {
                   <Textarea
                     value={composerText}
                     onChange={(event) => setComposerText(event.target.value)}
-                    placeholder="Type your message here"
+                    placeholder="Type your message"
                     className="min-h-[72px]"
                     maxLength={2000}
                   />
@@ -891,12 +909,12 @@ export default function ChatPage() {
             </>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-              <div className="text-xl font-extrabold text-black">Pick a conversation</div>
+              <div className="text-xl font-extrabold text-black">Select a conversation</div>
               <p className="max-w-md text-sm font-semibold text-black/55">
-                Choose a conversation on the left, or start one from a product or booking page.
+                Choose a conversation from the left, or start one from a product or booking page.
               </p>
               <Button type="button" variant="secondary" onClick={() => navigate("/products")}>
-                Browse products
+                Browse Products
               </Button>
             </div>
           )}

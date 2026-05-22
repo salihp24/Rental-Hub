@@ -1,8 +1,10 @@
 import express from "express";
 
 import {
+  loginAdmin,
   getAdminDashboardStats,
   getAdminHealth,
+  getAdminFinanceSummary,
   listAdminAuditLogs,
   listAdminBookings,
   listAdminProducts,
@@ -10,15 +12,18 @@ import {
   updateAdminBookingStatus,
   updateAdminProductFeatured,
   updateAdminProductStatus,
+  updateAdminOwnerActivity,
   updateAdminUserRole,
   updateAdminUserStatus,
 } from "../../controllers/admin/adminController.js";
 import isAdmin from "../../middleware/admin/isAdmin.js";
 import protect from "../../middleware/auth.js";
 import validate from "../../middleware/validate.js";
-import { adminValidation } from "../../validation/index.js";
+import { adminValidation, userValidation } from "../../validation/index.js";
 
 const router = express.Router();
+
+router.post("/login", validate(userValidation.login), loginAdmin);
 
 router.use(protect, isAdmin);
 
@@ -34,6 +39,11 @@ router.patch(
   "/users/:userId/role",
   validate({ ...adminValidation.userParams, ...adminValidation.updateUserRole }),
   updateAdminUserRole
+);
+router.patch(
+  "/users/:userId/owner-suspension",
+  validate({ ...adminValidation.userParams, ...adminValidation.updateOwnerActivity }),
+  updateAdminOwnerActivity
 );
 router.get("/products", validate(adminValidation.listProductsQuery), listAdminProducts);
 router.patch(
@@ -53,5 +63,6 @@ router.patch(
   updateAdminBookingStatus
 );
 router.get("/audit-logs", validate(adminValidation.listAuditLogsQuery), listAdminAuditLogs);
+router.get("/finance", validate(adminValidation.financeQuery), getAdminFinanceSummary);
 
 export default router;

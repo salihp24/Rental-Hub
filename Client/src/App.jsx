@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import Layout from "./components/Layout/Layout";
@@ -7,20 +7,31 @@ import ChatPage from "./pages/ChatPage";
 import HomePage from "./pages/HomePage";
 import ListProductPage from "./pages/ListProductPage";
 import LoginPage from "./pages/LoginPage";
+import GoogleAuthCallbackPage from "./pages/GoogleAuthCallbackPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ProductBrowsePage from "./pages/ProductBrowsePage";
 import RegisterPage from "./pages/RegisterPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
 import AdminUsersPage from "./pages/admin/AdminUsersPage";
+import AdminCategoriesPage from "./pages/admin/AdminCategoriesPage";
 import AdminProductsPage from "./pages/admin/AdminProductsPage";
 import AdminBookingsPage from "./pages/admin/AdminBookingsPage";
+import AdminFinancePage from "./pages/admin/AdminFinancePage";
 import AdminAuditLogsPage from "./pages/admin/AdminAuditLogsPage";
+import AdminLoginPage from "./pages/admin/AdminLoginPage";
 import { fetchCurrentUser } from "./store/slices/authSlice";
 
 function RequireAuth({ children }) {
   const { user } = useSelector((s) => s.auth);
   const location = useLocation();
+  const isBootstrappingAuth = useSelector((s) => s.auth.isBootstrapping);
+
+  if (isBootstrappingAuth) {
+    return <div className="p-6 text-sm font-semibold text-slate-600">Checking account...</div>;
+  }
 
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
@@ -31,9 +42,15 @@ function RequireAuth({ children }) {
 
 function RequireAdmin({ children }) {
   const { user } = useSelector((s) => s.auth);
+  const location = useLocation();
+  const isBootstrappingAuth = useSelector((s) => s.auth.isBootstrapping);
+
+  if (isBootstrappingAuth) {
+    return <div className="p-6 text-sm font-semibold text-slate-600">Checking account...</div>;
+  }
 
   if (!user?.role?.includes("admin")) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/admin/login" replace state={{ from: location.pathname }} />;
   }
 
   return children;
@@ -41,19 +58,32 @@ function RequireAdmin({ children }) {
 
 export default function App() {
   const dispatch = useDispatch();
-  const { token } = useSelector((s) => s.auth);
+  const { user } = useSelector((s) => s.auth);
+  const bootstrappingStartedRef = useRef(false);
 
   useEffect(() => {
-    if (token) {
+    if (bootstrappingStartedRef.current) return;
+    bootstrappingStartedRef.current = true;
+
+    if (!user) {
       dispatch(fetchCurrentUser());
     }
-  }, [dispatch, token]);
+  }, [dispatch, user]);
 
   return (
     <Routes>
+      <Route path="admin/login" element={<AdminLoginPage />} />
       <Route element={<Layout />}>
         <Route index element={<HomePage />} />
         <Route path="products" element={<ProductBrowsePage />} />
+        <Route
+          path="owner/listings/:productId/preview"
+          element={
+            <RequireAuth>
+              <ProductDetailPage />
+            </RequireAuth>
+          }
+        />
         <Route path="products/:productSlug" element={<ProductDetailPage />} />
         <Route
           path="chat"
@@ -72,6 +102,9 @@ export default function App() {
           }
         />
         <Route path="login" element={<LoginPage />} />
+        <Route path="auth/google/callback" element={<GoogleAuthCallbackPage />} />
+        <Route path="forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="reset-password/:token" element={<ResetPasswordPage />} />
         <Route path="register" element={<RegisterPage />} />
         <Route
           path="list"
@@ -92,17 +125,17 @@ export default function App() {
         <Route
           path="admin"
           element={
-            <RequireAuth>
-              <RequireAdmin>
-                <AdminLayout />
-              </RequireAdmin>
-            </RequireAuth>
+            <RequireAdmin>
+              <AdminLayout />
+            </RequireAdmin>
           }
         >
           <Route index element={<AdminDashboardPage />} />
           <Route path="users" element={<AdminUsersPage />} />
+          <Route path="categories" element={<AdminCategoriesPage />} />
           <Route path="products" element={<AdminProductsPage />} />
           <Route path="bookings" element={<AdminBookingsPage />} />
+          <Route path="finance" element={<AdminFinancePage />} />
           <Route path="audit-logs" element={<AdminAuditLogsPage />} />
         </Route>
       </Route>

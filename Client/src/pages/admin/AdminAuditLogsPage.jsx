@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import api from "../../lib/api";
 import Button from "../../components/ui/Button";
 import AuditLogsSection from "./AuditLogsSection";
+import { cardClass } from "./ui.jsx";
 
 export default function AdminAuditLogsPage() {
   const [logs, setLogs] = useState([]);
@@ -30,7 +31,7 @@ export default function AdminAuditLogsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-black/10 bg-white p-5">
+      <div className={`p-5 ${cardClass}`}>
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-black">Audit Logs</h1>
           <Button onClick={loadLogs}>Refresh</Button>
@@ -38,7 +39,7 @@ export default function AdminAuditLogsPage() {
         {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
       </div>
       {loading ? (
-        <div className="rounded-2xl border border-black/10 bg-white p-5 text-sm">Loading logs...</div>
+        <div className={`p-5 text-sm ${cardClass}`}>Loading logs...</div>
       ) : (
         <AuditLogsSection logs={logs} />
       )}

@@ -1,6 +1,7 @@
 // User model: account details, roles, owner profile data, and auth helpers.
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 const userSchema = new mongoose.Schema(
   {
@@ -63,7 +64,31 @@ const userSchema = new mongoose.Schema(
         state: String,
         pincode: String,
       },
+      trustedSeller: {
+        // null => no manual override, true => force trusted, false => force not trusted
+        manualOverride: {
+          type: Boolean,
+          default: null,
+        },
+        autoQualified: {
+          type: Boolean,
+          default: false,
+        },
+        completedReturnStreak: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        qualifiedAt: {
+          type: Date,
+          default: null,
+        },
+      },
       idVerified: { type: Boolean, default: false },
+      activitySuspended: { type: Boolean, default: false },
+      suspensionReason: { type: String, default: "" },
+      suspendedAt: { type: Date, default: null },
+      suspendedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     },
     // Ratings summary (updated when reviews are added)
     ratings: {
@@ -110,6 +135,15 @@ userSchema.methods.addOwnerRole = async function () {
     this.role.push("owner");
     await this.save();
   }
+};
+
+userSchema.methods.createPasswordResetToken = function () {
+  const resetToken = crypto.randomBytes(32).toString("hex");
+
+  this.passwordResetToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+  this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
+
+  return resetToken;
 };
 
 const User = mongoose.model("User", userSchema);

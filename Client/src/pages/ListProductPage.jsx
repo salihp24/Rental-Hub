@@ -24,10 +24,10 @@ const emptyImageRow = () => ({
   publicId: "",
 });
 
-const emptySlabRow = () => ({
-  minDays: "7",
-  maxDays: "30",
-  discountPercent: "10",
+const emptySlabRow = (seed = {}) => ({
+  minDays: seed.minDays ?? "7",
+  maxDays: seed.maxDays ?? "30",
+  discountPercent: seed.discountPercent ?? "10",
 });
 
 function normaliseCategoryId(id) {
@@ -51,7 +51,10 @@ function validateSlabsForSubmit(slabs) {
       return { error: `Slab ${i + 1}: min days must be an integer >= 1.`, slabs: null };
     }
     if (!Number.isInteger(maxDays) || maxDays < minDays) {
-      return { error: `Slab ${i + 1}: max days must be an integer >= min days.`, slabs: null };
+      return {
+        error: `Slab ${i + 1}: max days must be an integer greater than or equal to min days (currently ${slab.maxDays || "empty"} < ${slab.minDays || "empty"}).`,
+        slabs: null,
+      };
     }
     if (maxDays > 9999) {
       return { error: `Slab ${i + 1}: max days must be <= 9999.`, slabs: null };
@@ -110,8 +113,6 @@ export default function ListProductPage() {
   const [dailyRate, setDailyRate] = useState("");
   const [deposit, setDeposit] = useState("0");
   const [currency, setCurrency] = useState("INR");
-  const [hourlyEnabled, setHourlyEnabled] = useState(false);
-  const [hourlyRate, setHourlyRate] = useState("0");
   const [weeklyEnabled, setWeeklyEnabled] = useState(false);
   const [weeklyRate, setWeeklyRate] = useState("0");
   const [slabs, setSlabs] = useState([]);
@@ -170,7 +171,7 @@ export default function ListProductPage() {
       setError(null);
 
       try {
-        const res = await api.get(`/products/${productId}`);
+        const res = await api.get(`/products/preview/${productId}`);
         const product = res.data?.data?.product;
 
         if (!alive || !product) return;
@@ -191,8 +192,6 @@ export default function ListProductPage() {
         setDailyRate(String(product.pricing?.daily?.rate ?? ""));
         setDeposit(String(product.pricing?.deposit ?? 0));
         setCurrency(product.pricing?.currency || "INR");
-        setHourlyEnabled(Boolean(product.pricing?.hourly?.enabled));
-        setHourlyRate(String(product.pricing?.hourly?.rate ?? 0));
         setWeeklyEnabled(Boolean(product.pricing?.weekly?.enabled));
         setWeeklyRate(String(product.pricing?.weekly?.rate ?? 0));
         setSlabs(
@@ -296,7 +295,26 @@ export default function ListProductPage() {
     );
   };
 
-  const addSlabRow = () => setSlabs((prev) => [...prev, emptySlabRow()]);
+  const addSlabRow = () =>
+    setSlabs((prev) => {
+      const last = prev[prev.length - 1];
+      const lastMax = Number(last?.maxDays);
+
+      if (Number.isInteger(lastMax) && lastMax >= 1) {
+        const nextMin = lastMax + 1;
+        const nextMax = Math.min(nextMin + 29, 9999);
+        return [
+          ...prev,
+          emptySlabRow({
+            minDays: String(nextMin),
+            maxDays: String(nextMax),
+            discountPercent: last?.discountPercent || "10",
+          }),
+        ];
+      }
+
+      return [...prev, emptySlabRow()];
+    });
   const removeSlabRow = (index) => setSlabs((prev) => prev.filter((_, i) => i !== index));
 
   const onSubmit = async (e) => {
@@ -414,8 +432,8 @@ export default function ListProductPage() {
       attributes: attrPayload,
       pricing: {
         hourly: {
-          enabled: hourlyEnabled,
-          rate: Number(hourlyRate) || 0,
+          enabled: false,
+          rate: 0,
         },
         daily: {
           enabled: true,
@@ -462,8 +480,8 @@ export default function ListProductPage() {
         setTimeout(() => navigate("/account"), 900);
       } else {
         await api.post("/products", body);
-        setSuccess("Listing created successfully.");
-        setTimeout(() => navigate("/"), 900);
+        setSuccess("Listing submitted for admin review. It will appear publicly after approval.");
+        setTimeout(() => navigate("/account"), 1200);
       }
     } catch (err) {
       setError(
@@ -730,24 +748,6 @@ export default function ListProductPage() {
             </div>
 
             <div className="grid gap-4 rounded-2xl border border-black/10 bg-black/[0.02] p-4 sm:grid-cols-2">
-              <label className="flex items-center gap-2 text-sm font-semibold text-black">
-                <input
-                  type="checkbox"
-                  checked={hourlyEnabled}
-                  onChange={(e) => setHourlyEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-black/20"
-                />
-                Hourly pricing
-              </label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={hourlyRate}
-                onChange={(e) => setHourlyRate(e.target.value)}
-                disabled={!hourlyEnabled}
-                placeholder="Hourly rate"
-              />
               <label className="flex items-center gap-2 text-sm font-semibold text-black">
                 <input
                   type="checkbox"

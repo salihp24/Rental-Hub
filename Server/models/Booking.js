@@ -158,6 +158,16 @@ const bookingSchema = new mongoose.Schema(
       requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       confirmedAt: Date,
       confirmedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      settlement: {
+        policy: { type: String, default: "" },
+        refundRateApplied: { type: Number, default: 0 },
+        usedUnits: { type: Number, default: 0 },
+        totalUnits: { type: Number, default: 0 },
+        unusedUnits: { type: Number, default: 0 },
+        chargeAmount: { type: Number, default: 0 },
+        refundAmount: { type: Number, default: 0 },
+        settledAt: Date,
+      },
     },
     // Delivery preference
     deliveryType: {

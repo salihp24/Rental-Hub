@@ -1,27 +1,25 @@
 import axios from "axios";
 
-const AUTH_STORAGE_KEY = "rentalhub_auth";
+const normalizeBaseUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
+
+export const getApiBaseUrl = () => {
+  const configured = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
+  if (configured) {
+    return configured;
+  }
+
+  if (import.meta.env.DEV) {
+    return "/api/v1";
+  }
+
+  throw new Error(
+    "Missing VITE_API_BASE_URL in production. Set it to your backend API base URL (for example: https://api.example.com/api/v1)."
+  );
+};
 
 const api = axios.create({
-  baseURL:
-    import.meta.env.VITE_API_BASE_URL ||
-    (import.meta.env.DEV ? "/api/v1" : "http://localhost:5000/api/v1"),
+  baseURL: getApiBaseUrl(),
   withCredentials: true,
-});
-
-api.interceptors.request.use((config) => {
-  try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return config;
-    const parsed = JSON.parse(raw);
-    const token = parsed?.token;
-    if (token && !config.headers.Authorization) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  } catch {
-    // ignore malformed storage
-  }
-  return config;
 });
 
 export default api;
